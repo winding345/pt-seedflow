@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from typing import List
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .scheduler import ServiceRunner
@@ -39,6 +39,9 @@ PAGE = """<!doctype html>
   .act.would-add .k { color: #e7c96e; }
   .act.error .k { color: #f87171; }
   .err { color: #f87171; font-size: 12px; margin-top: 6px; }
+  button { background:#2b2f38; color:#d7dae0; border:1px solid #3a3f4a; border-radius:6px;
+           padding:5px 10px; font-size:12px; cursor:pointer; margin-right:6px; }
+  button:hover { background:#343a45; }
 </style>
 </head>
 <body>
@@ -46,6 +49,16 @@ PAGE = """<!doctype html>
 <div class="sub" id="meta">加载中…</div>
 <div class="grid" id="grid"></div>
 <script>
+async function fire(name, action){
+  if(!confirm('确认对 ' + name + ' 执行手动' + (action==='add'?'加种':'删种') + '？')) return;
+  const r = await fetch('api/trigger', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({service:name, action:action})
+  });
+  const d = await r.json().catch(()=>({error:'响应解析失败'}));
+  if(d.error) alert(d.error);
+  refresh();
+}
 function fmt(sec){ if(sec<=0) return "即将"; var m=Math.floor(sec/60); return m+" 分钟后"; }
 function esc(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 async function refresh(){
@@ -74,6 +87,8 @@ async function refresh(){
         + '<div class="row"><span>累计 加/删</span><b>' + s.added_total + ' / ' + s.deleted_total + '</b></div>'
         + (s.last_error ? '<div class="err">' + esc(s.last_error) + '</div>' : '')
         + '<div class="acts">' + acts + '</div>'
+        + '<div class="acts"><button onclick="fire(\'' + esc(s.name) + '\',\'add\')">手动加种</button>'
+        + '<button onclick="fire(\'' + esc(s.name) + '\',\'delete\')">手动删种</button></div>'
         + '</div>';
     }).join('');
   } catch (e) {
@@ -94,6 +109,18 @@ def create_app(runners: List[ServiceRunner], started_at: float) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
         return PAGE
+
+    @app.post("/api/trigger")
+    def trigger(payload: dict = Body(...)) -> JSONResponse:
+        name = payload.get("service")
+        action = payload.get("action", "both")
+        runner = next((r for r in runners if r.cfg.name == name), None)
+        if runner is None:
+            return JSONResponse({"error": "未知服务: %s" % name}, status_code=404)
+        try:
+            return JSONResponse(runner.manual(action))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
     @app.get("/api/status")
     def status() -> JSONResponse:

@@ -91,6 +91,43 @@ class ServiceRunner:
                 self.last_error = "%s: %s" % (type(exc).__name__, exc)
                 self._log("error", "-", self.last_error)
 
+    def manual(self, action: str = "both") -> dict:
+        """手动触发一次加/删，不触发 search。
+
+        action: add | delete | both
+        """
+        if action not in ("add", "delete", "both"):
+            raise ValueError("action 只能是 add / delete / both")
+
+        with self._lock:
+            self.last_error = ""
+            done: List[str] = []
+            try:
+                torrents = self.qb.list_torrents(category=self.cfg.category)
+                self.used_bytes = sum(t.size for t in torrents)
+                self.torrent_count = len(torrents)
+
+                if action in ("delete", "both"):
+                    self._step_delete(torrents)
+                    done.append("delete")
+                    if action == "both":
+                        torrents = self.qb.list_torrents(category=self.cfg.category)
+                        self.used_bytes = sum(t.size for t in torrents)
+                        self.torrent_count = len(torrents)
+
+                if action in ("add", "both"):
+                    if not self.candidates:
+                        self._log("idle", "手动加种", "候选池为空，先等一次 search")
+                    else:
+                        self._step_add(torrents)
+                        done.append("add")
+            except Exception as exc:  # noqa: BLE001
+                self.last_error = "%s: %s" % (type(exc).__name__, exc)
+                self._log("error", "-", self.last_error)
+
+            return {"service": self.cfg.name, "action": action,
+                    "done": done, "snapshot": self.snapshot()}
+
     # ---------- 删除 ----------
     def _step_delete(self, torrents) -> None:
         now = time.time()
