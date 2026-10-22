@@ -1,19 +1,8 @@
 #!/usr/bin/env bash
-# NAS 上的部署入口：保持命令很短，方便在受限终端里执行
-# 用法：
-#   bash deploy.sh                 # 先拉代码（最多 45s），再重建
-#   PT_SKIP_PULL=1 bash deploy.sh  # 跳过拉取，直接用本地代码
+# 只负责部署：重建容器并启动。不碰 git，永远不会卡在网络上。
+# 更新代码请单独运行 sync.sh
 set -uo pipefail
 cd "$(dirname "$0")"
-
-if [ "${PT_SKIP_PULL:-0}" != "1" ]; then
-  echo "--- 拉取代码（最多 45s）---"
-  if GIT_TERMINAL_PROMPT=0 timeout 45 git pull --ff-only; then
-    echo "[ok] 代码已更新"
-  else
-    echo "[warn] 拉取失败或超时，改用本地代码继续"
-  fi
-fi
 
 mkdir -p data
 if [ ! -f data/config.yaml ]; then
@@ -26,7 +15,7 @@ fi
 sed -i 's#host\.docker\.internal#127.0.0.1#g' data/config.yaml
 
 echo "--- 当前提交 ---"
-git log --oneline -1 || true
+git log --oneline -1 2>/dev/null || true
 
 nohup docker compose up -d --build --force-recreate > /tmp/psf.log 2>&1 &
 echo "STARTED (log: /tmp/psf.log)"
