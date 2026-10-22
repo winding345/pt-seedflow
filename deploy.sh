@@ -14,5 +14,5 @@ fi
 # 容器改为 host 网络后，旧配置里的 host.docker.internal 需要迁移
 sed -i 's#http://host.docker.internal:8085#http://127.0.0.1:8085#' data/config.yaml
 
-nohup docker compose up -d --build > /tmp/psf.log 2>&1 &
+nohup docker compose up -d --build --force-recreate > /tmp/psf.log 2>&1 &
 echo "STARTED (log: /tmp/psf.log)"
