@@ -261,3 +261,16 @@ def test_plan_reports_space_shortage():
                      used_bytes=0, current_count=0, dl_left=5)
     assert plan.picks == []
     assert "空间不足" in plan.stop_reason
+
+
+def test_exemption_uses_qb_added_on_not_service_start():
+    """豁免期按 qB 的 added_on 算：20 分钟前加的任务仍在豁免内。"""
+    cfg = service(exempt_minutes=60)
+    now = time.time()
+    recent = torrent(progress=1.0, age_min=20)
+    ok, reason = decide_delete(recent, cfg, now, 0)
+    assert not ok and reason == "豁免期内"
+
+    old = torrent(progress=1.0, age_min=90)
+    ok2, reason2 = decide_delete(old, cfg, now, 0)
+    assert not ok2 and reason2 == "最短保留期内"

@@ -179,8 +179,12 @@ class ServiceRunner:
 
         for torrent in torrents:
             self.store.add_sample(self.cfg.name, torrent.hash, torrent.uploaded, int(now))
-            window_bytes = self.store.upload_window(
-                self.cfg.name, torrent.hash, int(now - window))
+            # 统计窗口从"qB 添加时间"和"窗口起点"里取较晚的那个：
+            # 刚加进来 20 分钟的种子，不应该拿 1 小时的阈值去衡量它
+            since = int(now - window)
+            if torrent.added_on:
+                since = max(since, int(torrent.added_on))
+            window_bytes = self.store.upload_window(self.cfg.name, torrent.hash, since)
 
             previous = self._progress.get(torrent.hash)
             info = meta.get(torrent.hash) or {}
@@ -409,12 +413,15 @@ class ServiceRunner:
         active = []
         for t in self.torrents_cache:
             ratio = (t.uploaded / t.downloaded) if t.downloaded else 0.0
+            since = window_start
+            if t.added_on:
+                since = max(since, int(t.added_on))
             active.append({
                 "name": t.name,
                 "size": t.size,
                 "downloaded": t.downloaded,
                 "uploaded": t.uploaded,
-                "last_hour_upload": self.store.upload_window(self.cfg.name, t.hash, window_start) or 0,
+                "last_hour_upload": self.store.upload_window(self.cfg.name, t.hash, since) or 0,
                 "ratio": round(ratio, 3),
                 "progress": round(t.progress * 100, 1),
                 "seeds": t.num_seeds,
