@@ -131,6 +131,26 @@ app/
 tests/             离线单测
 ```
 
+
+## 在 NAS 上同步代码
+
+NAS 通常只读不写，且部分网络环境直连 GitHub 不稳定，因此可以长期把 origin 指向加速镜像：
+
+```bash
+cd ~/workspace/pt-seedflow
+git remote set-url origin https://ghproxy.net/https://github.com/winding345/pt-seedflow.git
+git pull
+```
+
+也可以保留 GitHub 为 origin，改用 `sync.sh`（会先试 origin，失败自动回退到镜像）：
+
+```bash
+bash sync.sh      # 只同步代码
+bash deploy.sh    # 只构建启动，不碰 git
+```
+
+`deploy.sh` 刻意不包含任何网络拉取动作，避免网络故障时整条部署流程卡死。
+
 ## 已知边界
 
 - 只处理自己 `category` 下的任务，不会触碰其他任务
