@@ -22,6 +22,7 @@ body {
 }
 
 .wrap { max-width: 1400px; margin: 0 auto; padding: 28px 32px 60px; }
+.wrap.wide { max-width: none; padding: 20px 18px 40px; }
 
 .top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
 .top h1 { font-size: 24px; font-weight: 500; color: #34495e; letter-spacing: -0.02em; }
@@ -127,24 +128,24 @@ button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
   background: #fff; border-radius: 8px; overflow: hidden;
   box-shadow: 0 4px 12px rgba(52, 73, 94, 0.08); border: 1px solid var(--line);
 }
-.table-wrapper { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-wrapper { overflow-x: auto; max-height: calc(100vh - 260px); overflow-y: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: auto; }
 thead th {
   position: sticky; top: 0; z-index: 1;
   background: #f8f9fa; color: #2c3e50;
   font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;
-  padding: 12px 10px; text-align: right; white-space: nowrap;
+  padding: 10px 7px; text-align: right; white-space: nowrap;
   border-bottom: 2px solid #e9ecef;
 }
 thead th:first-child, thead th:nth-child(2) { text-align: left; }
 tbody td {
-  padding: 10px; border-bottom: 1px solid #f1f4f7;
+  padding: 8px 7px; border-bottom: 1px solid #f1f4f7;
   text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 tbody td:first-child, tbody td:nth-child(2) { text-align: left; }
 tbody tr:nth-child(even) { background: #fbfcfd; }
 tbody tr:hover { background: #f2f7fc; }
-td.name { max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
+td.name { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill { font-size: 11px; padding: 1px 8px; border-radius: 9px; }
 .pill.on { background: #e8f8ef; color: var(--ok); }
 .pill.off { background: #fdecea; color: var(--bad); }

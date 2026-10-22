@@ -124,6 +124,7 @@ function cardHtml(s) {
 }
 
 function renderList(data) {
+  document.querySelector('.wrap').classList.remove('wide');
   const total = data.services.length;
   app.innerHTML =
     '<div class="top"><h1>pt-seedflow</h1>'
@@ -150,6 +151,7 @@ const COLUMNS = [
   ['下载', row => row.leechs],
   ['下载速度', row => speed(row.dlspeed)],
   ['上传速度', row => speed(row.upspeed)],
+  ['发布时间', row => ts(row.published_at)],
   ['添加时间', row => ts(row.added_on)],
   ['最近活跃', row => ts(row.last_activity)],
   ['促销结束', row => ts(row.discount_end)],
@@ -169,6 +171,7 @@ function tableHtml(rows) {
 }
 
 function renderDetail(data, rows) {
+  document.querySelector('.wrap').classList.add('wide');
   const svc = data.services.find(s => s.name === detailName);
   if (!svc) {
     location.hash = '';

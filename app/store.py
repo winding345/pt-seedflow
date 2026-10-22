@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS torrent_archive (
     discount    TEXT,
     added_on    INTEGER,
     removed_at  INTEGER NOT NULL,
-    reason      TEXT
+    reason      TEXT,
+    published_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS torrent_meta (
@@ -63,6 +64,7 @@ CREATE TABLE IF NOT EXISTS torrent_meta (
     tid          TEXT,
     discount     TEXT,
     discount_end INTEGER,
+    published_at INTEGER,
     added_at     INTEGER,
     PRIMARY KEY (service, hash)
 );
@@ -106,6 +108,13 @@ class Store:
         columns = {row[1] for row in cur.fetchall()}
         if "discount_end" not in columns:
             cur.execute("ALTER TABLE torrent_archive ADD COLUMN discount_end INTEGER")
+        if "published_at" not in columns:
+            cur.execute("ALTER TABLE torrent_archive ADD COLUMN published_at INTEGER")
+
+        cur.execute("PRAGMA table_info(torrent_meta)")
+        meta_columns = {row[1] for row in cur.fetchall()}
+        if meta_columns and "published_at" not in meta_columns:
+            cur.execute("ALTER TABLE torrent_meta ADD COLUMN published_at INTEGER")
         cur.close()
 
     @contextmanager
@@ -250,53 +259,62 @@ class Store:
                         downloaded: int, uploaded: int, progress: float,
                         discount: str = "", added_on: Optional[int] = None,
                         reason: str = "", removed_at: Optional[int] = None,
-                        discount_end: Optional[int] = None) -> None:
+                        discount_end: Optional[int] = None,
+                        published_at: Optional[int] = None) -> None:
         stamp = int(removed_at if removed_at is not None else time.time())
         with self._cursor() as cur:
             cur.execute(
                 "INSERT INTO torrent_archive(service, hash, name, size, downloaded, uploaded,"
-                " progress, discount, added_on, removed_at, reason, discount_end)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " progress, discount, added_on, removed_at, reason, discount_end,"
+                " published_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (service, hash_, name, int(size), int(downloaded), int(uploaded),
                  float(progress), discount, int(added_on or 0), stamp, reason,
-                 int(discount_end) if discount_end else None),
+                 int(discount_end) if discount_end else None,
+                 int(published_at) if published_at else None),
             )
 
     def archived_torrents(self, service: str, limit: int = 200) -> List[dict]:
         with self._cursor() as cur:
             cur.execute(
                 "SELECT name, size, downloaded, uploaded, progress, discount,"
-                " added_on, removed_at, reason, discount_end FROM torrent_archive"
+                " added_on, removed_at, reason, discount_end, published_at FROM torrent_archive"
                 " WHERE service=? ORDER BY removed_at DESC LIMIT ?",
                 (service, int(limit)),
             )
             rows = cur.fetchall()
         keys = ("name", "size", "downloaded", "uploaded", "progress",
-                "discount", "added_on", "removed_at", "reason", "discount_end")
+                "discount", "added_on", "removed_at", "reason", "discount_end",
+                "published_at")
         return [dict(zip(keys, row)) for row in rows]
 
     # ---------- 种子元数据（促销截止等） ----------
     def set_meta(self, service: str, hash_: str, tid: str, discount: str,
-                 discount_end: Optional[int], added_at: Optional[int] = None) -> None:
+                 discount_end: Optional[int], added_at: Optional[int] = None,
+                 published_at: Optional[int] = None) -> None:
         with self._cursor() as cur:
             cur.execute(
-                "INSERT INTO torrent_meta(service, hash, tid, discount, discount_end, added_at)"
-                " VALUES (?,?,?,?,?,?) ON CONFLICT(service, hash) DO UPDATE SET"
+                "INSERT INTO torrent_meta(service, hash, tid, discount, discount_end,"
+                " published_at, added_at)"
+                " VALUES (?,?,?,?,?,?,?) ON CONFLICT(service, hash) DO UPDATE SET"
                 " tid=excluded.tid, discount=excluded.discount,"
-                " discount_end=excluded.discount_end",
+                " discount_end=excluded.discount_end,"
+                " published_at=excluded.published_at",
                 (service, hash_, str(tid), discount,
                  int(discount_end) if discount_end else None,
+                 int(published_at) if published_at else None,
                  int(added_at or time.time())),
             )
 
     def meta_map(self, service: str) -> dict:
         with self._cursor() as cur:
             cur.execute(
-                "SELECT hash, tid, discount, discount_end, added_at FROM torrent_meta"
+                "SELECT hash, tid, discount, discount_end, added_at, published_at"
+                " FROM torrent_meta"
                 " WHERE service=?", (service,))
             rows = cur.fetchall()
         return {row[0]: {"tid": row[1], "discount": row[2],
-                         "discount_end": row[3], "added_at": row[4]} for row in rows}
+                         "discount_end": row[3], "added_at": row[4],
+                         "published_at": row[5]} for row in rows}
 
     # ---------- 服务级键值（如上次 search 时间） ----------
     def kv_set(self, service: str, key: str, value: int) -> None:

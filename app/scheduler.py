@@ -216,6 +216,7 @@ class ServiceRunner:
                 now_ts = int(time.time())
                 for item_hash, item_name in verified:
                     snap = by_hash.get(item_hash)
+                    info_x = meta.get(item_hash) or {}
                     self.store.archive_torrent(
                         service=self.cfg.name,
                         hash_=item_hash,
@@ -227,7 +228,8 @@ class ServiceRunner:
                         added_on=snap.added_on if snap else None,
                         reason=reason_for.get(item_hash, ""),
                         discount=(meta.get(item_hash) or {}).get("discount", ""),
-                        discount_end=(meta.get(item_hash) or {}).get("discount_end"),
+                        discount_end=(info_x.get("discount_end") if info_x else None),
+                        published_at=(info_x.get("published_at") if info_x else None),
                         removed_at=now_ts,
                     )
                     self._prev.pop(item_hash, None)
@@ -330,7 +332,8 @@ class ServiceRunner:
                     known_hashes.add(new_hash)
                     self.store.set_meta(
                         self.cfg.name, new_hash, pick.candidate.tid,
-                        pick.candidate.discount, pick.candidate.discount_end)
+                        pick.candidate.discount, pick.candidate.discount_end,
+                        published_at=pick.candidate.created)
                 self.used_bytes += pick.candidate.size
                 self.torrent_count += 1
                 self._log("add", pick.candidate.name,
@@ -433,6 +436,7 @@ class ServiceRunner:
                 "state": t.state,
                 "discount": (meta.get(t.hash) or {}).get("discount", ""),
                 "discount_end": (meta.get(t.hash) or {}).get("discount_end"),
+                "published_at": (meta.get(t.hash) or {}).get("published_at"),
             })
         removed = []
         for row in self.store.archived_torrents(self.cfg.name):
@@ -455,6 +459,7 @@ class ServiceRunner:
                 "removed_at": row["removed_at"],
                 "discount": row.get("discount") or "",
                 "discount_end": row.get("discount_end"),
+                "published_at": row.get("published_at"),
             })
         return {"active": active, "removed": removed}
 
