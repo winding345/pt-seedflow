@@ -1,0 +1,75 @@
+{
+ "uptime_seconds": 585,
+ "uptime_human": "9分45秒",
+ "services": [
+  {
+   "name": "auto-mteam-1",
+   "site": "mteam",
+   "last_error": "",
+   "config": {
+    "enabled": true,
+    "dry_run": false,
+    "disk_gb": 50.0,
+    "discounts": [
+     "FREE",
+     "_2X_FREE"
+    ],
+    "categories": [],
+    "size_mb": [
+     1024,
+     102400
+    ],
+    "save_path": "",
+    "category": "auto-mteam-1",
+    "delete_threshold_mb": 1024.0,
+    "window_minutes": 60,
+    "exempt_minutes": 60,
+    "min_keep_minutes": 120,
+    "max_torrents": 30,
+    "add_per_tick": 2,
+    "limits": {
+     "search_per_day": 1000,
+     "dl_per_day": 100,
+     "safety": 0.9
+    }
+   },
+   "stats": {
+    "used_gb": 48.68,
+    "torrents": 9,
+    "candidates": 100,
+    "current_downloaded": 52265762816,
+    "current_uploaded": 1824522240,
+    "since_start_downloaded": 52265762816,
+    "since_start_uploaded": 1824522240,
+    "added_total": 9,
+    "removed_total": 0,
+    "search_used": 8,
+    "search_cap": 900,
+    "dl_used": 22,
+    "dl_cap": 90,
+    "next_search_seconds": 3300,
+    "quota_exhausted": false
+   },
+   "actions": [
+    {
+     "time": "18:01:46",
+     "kind": "idle",
+     "name": "本轮未加种",
+     "detail": "候选已用尽"
+    },
+    {
+     "time": "17:56:45",
+     "kind": "search",
+     "name": "候选池",
+     "detail": "100 个候选"
+    },
+    {
+     "time": "17:56:45",
+     "kind": "add",
+     "name": "Frieren Beyond Journeys End S02",
+     "detail": "14.46GB FREE"
+    }
+   ]
+  }
+ ]
+}

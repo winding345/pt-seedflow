@@ -47,7 +47,11 @@ class TorrentView:
     dlspeed: int = 0
     upspeed: int = 0
     uploaded: int = 0
+    downloaded: int = 0
+    num_seeds: int = 0
+    num_leechs: int = 0
     added_on: Optional[int] = None
+    last_activity: Optional[int] = None
     category: str = ""
 
     @property

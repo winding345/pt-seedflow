@@ -56,6 +56,13 @@ class ServiceRunner:
     deleted_total: int = 0
     added_total: int = 0
     _progress: Dict[str, float] = field(default_factory=dict)
+    # 每个任务的累计值快照，用于计算增量
+    _prev: Dict[str, tuple] = field(default_factory=dict)
+    # 服务启动以来的累计下载/上传字节数
+    dl_since_start: int = 0
+    ul_since_start: int = 0
+    # 最近一次 qB 任务快照，供详情页使用（避免 Web 端反查 qB）
+    torrents_cache: List[object] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     # ---------- 工具 ----------
@@ -64,6 +71,25 @@ class ServiceRunner:
 
     def _need_refresh(self) -> bool:
         return self.ticks_since_search >= self.refresh_every_ticks
+
+    def _account(self, torrents) -> None:
+        """把每个任务的增量累加到"服务启动以来"的统计里。"""
+        alive = set()
+        for torrent in torrents:
+            alive.add(torrent.hash)
+            prev = self._prev.get(torrent.hash)
+            if prev is not None:
+                up_delta = torrent.uploaded - prev[0]
+                dl_delta = torrent.downloaded - prev[1]
+                if up_delta > 0:
+                    self.ul_since_start += up_delta
+                if dl_delta > 0:
+                    self.dl_since_start += dl_delta
+            self._prev[torrent.hash] = (torrent.uploaded, torrent.downloaded)
+        # 已不存在的任务不再保留快照
+        for dead in [h for h in self._prev if h not in alive]:
+            self._prev.pop(dead, None)
+        self.torrents_cache = list(torrents)
 
     # ---------- 主循环 ----------
     def tick(self) -> None:
@@ -75,6 +101,7 @@ class ServiceRunner:
                 torrents = self.qb.list_torrents(category=self.cfg.category)
                 self.used_bytes = sum(t.size for t in torrents)
                 self.torrent_count = len(torrents)
+                self._account(torrents)
                 self._step_delete(torrents)
                 if self._need_refresh():
                     self._step_search()
@@ -107,6 +134,7 @@ class ServiceRunner:
                 torrents = self.qb.list_torrents(category=self.cfg.category)
                 self.used_bytes = sum(t.size for t in torrents)
                 self.torrent_count = len(torrents)
+                self._account(torrents)
 
                 if action in ("delete", "both"):
                     self._step_delete(torrents)
@@ -161,8 +189,26 @@ class ServiceRunner:
             if not verified:
                 return
             hashes = [item[0] for item in verified]
+            by_hash = {t.hash: t for t in torrents}
             if self.qb.delete(hashes, delete_files=True):
                 self.deleted_total += len(hashes)
+                now_ts = int(time.time())
+                for item_hash, item_name in verified:
+                    snap = by_hash.get(item_hash)
+                    self.store.archive_torrent(
+                        service=self.cfg.name,
+                        hash_=item_hash,
+                        name=item_name,
+                        size=snap.size if snap else 0,
+                        downloaded=snap.downloaded if snap else 0,
+                        uploaded=snap.uploaded if snap else 0,
+                        progress=snap.progress if snap else 0.0,
+                        added_on=snap.added_on if snap else None,
+                        reason="上传量不足",
+                        removed_at=now_ts,
+                    )
+                    self._prev.pop(item_hash, None)
+                self.store.counter_add(self.cfg.name, "removed", len(hashes))
                 self._log("deleted", "%d 个任务" % len(hashes), "已连同文件删除")
             else:
                 self._log("error", "-", "删除失败，共 %d 个" % len(hashes))
@@ -243,6 +289,7 @@ class ServiceRunner:
             )
             if ok:
                 self.added_total += 1
+                self.store.counter_add(self.cfg.name, "added")
                 self.store.mark_added(self.cfg.name, pick.candidate.tid, pick.candidate.name)
                 self.used_bytes += pick.candidate.size
                 self.torrent_count += 1
@@ -264,35 +311,104 @@ class ServiceRunner:
 
     # ---------- Web 快照 ----------
     def snapshot(self) -> dict:
-        cap = self.cfg.limits
-        search_used = self.store.quota_used(self.cfg.name, "search", today())
-        dl_used = self.store.quota_used(self.cfg.name, "dl", today())
-        next_search = max(
-            0,
-            int((self.refresh_every_ticks - self.ticks_since_search) * self.tick_seconds),
-        )
+        cfg = self.cfg
+        cap = cfg.limits
+        search_used = self.store.quota_used(cfg.name, "search", today())
+        dl_used = self.store.quota_used(cfg.name, "dl", today())
+        next_search = max(0, int((self.refresh_every_ticks - self.ticks_since_search) * self.tick_seconds))
+
+        current_dl = sum(getattr(t, "downloaded", 0) for t in self.torrents_cache)
+        current_ul = sum(getattr(t, "uploaded", 0) for t in self.torrents_cache)
+
         return {
-            "name": self.cfg.name,
-            "site": self.cfg.site,
-            "dry_run": self.cfg.dry_run,
-            "disk_gb": self.cfg.disk_gb,
-            "used_gb": round(self.used_bytes / 1024 ** 3, 2),
-            "torrents": self.torrent_count,
-            "max_torrents": self.cfg.max_torrents,
-            "candidates": len(self.candidates),
-            "quota": {
-                "dl_used": dl_used,
-                "dl_cap": cap.dl_cap,
+            "name": cfg.name,
+            "site": cfg.site,
+            "last_error": self.last_error,
+            "config": {
+                "enabled": cfg.enabled,
+                "dry_run": cfg.dry_run,
+                "disk_gb": cfg.disk_gb,
+                "discounts": list(cfg.discounts),
+                "categories": list(cfg.categories),
+                "size_mb": list(cfg.size_mb),
+                "save_path": cfg.save_path,
+                "category": cfg.category,
+                "delete_threshold_mb": cfg.delete_threshold_mb,
+                "window_minutes": cfg.window_minutes,
+                "exempt_minutes": cfg.exempt_minutes,
+                "min_keep_minutes": cfg.min_keep_minutes,
+                "max_torrents": cfg.max_torrents,
+                "add_per_tick": cfg.add_per_tick,
+                "limits": {
+                    "search_per_day": cap.search_per_day,
+                    "dl_per_day": cap.dl_per_day,
+                    "safety": cap.safety,
+                },
+            },
+            "stats": {
+                "used_gb": round(self.used_bytes / 1024 ** 3, 2),
+                "torrents": self.torrent_count,
+                "candidates": len(self.candidates),
+                "current_downloaded": current_dl,
+                "current_uploaded": current_ul,
+                "since_start_downloaded": self.dl_since_start,
+                "since_start_uploaded": self.ul_since_start,
+                "added_total": self.store.counter_get(cfg.name, "added"),
+                "removed_total": self.store.counter_get(cfg.name, "removed"),
                 "search_used": search_used,
                 "search_cap": cap.search_cap,
+                "dl_used": dl_used,
+                "dl_cap": cap.dl_cap,
+                "next_search_seconds": next_search,
+                "quota_exhausted": self.quota_exhausted,
             },
-            "next_search_seconds": next_search,
-            "quota_exhausted": self.quota_exhausted,
-            "added_total": self.added_total,
-            "deleted_total": self.deleted_total,
-            "last_error": self.last_error,
             "actions": [a.as_dict() for a in list(self.actions)[:20]],
         }
+
+    def torrent_rows(self, now: Optional[float] = None) -> dict:
+        """详情页数据：运行中的任务 + 已删除的归档。"""
+        now = time.time() if now is None else now
+        window_start = int(now - 3600)
+        active = []
+        for t in self.torrents_cache:
+            ratio = (t.uploaded / t.downloaded) if t.downloaded else 0.0
+            active.append({
+                "name": t.name,
+                "size": t.size,
+                "downloaded": t.downloaded,
+                "uploaded": t.uploaded,
+                "last_hour_upload": self.store.upload_window(self.cfg.name, t.hash, window_start) or 0,
+                "ratio": round(ratio, 3),
+                "progress": round(t.progress * 100, 1),
+                "seeds": t.num_seeds,
+                "leechs": t.num_leechs,
+                "dlspeed": t.dlspeed,
+                "upspeed": t.upspeed,
+                "added_on": t.added_on or 0,
+                "last_activity": t.last_activity or 0,
+                "state": t.state,
+            })
+        removed = []
+        for row in self.store.archived_torrents(self.cfg.name):
+            ratio = (row["uploaded"] / row["downloaded"]) if row["downloaded"] else 0.0
+            removed.append({
+                "name": row["name"],
+                "size": row["size"],
+                "downloaded": row["downloaded"],
+                "uploaded": row["uploaded"],
+                "last_hour_upload": 0,
+                "ratio": round(ratio, 3),
+                "progress": round((row["progress"] or 0) * 100, 1),
+                "seeds": 0,
+                "leechs": 0,
+                "dlspeed": 0,
+                "upspeed": 0,
+                "added_on": row["added_on"] or 0,
+                "last_activity": row["removed_at"] or 0,
+                "state": "removed",
+                "removed_at": row["removed_at"],
+            })
+        return {"active": active, "removed": removed}
 
 
 class Scheduler(threading.Thread):

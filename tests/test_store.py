@@ -92,3 +92,32 @@ def test_added_history_prevents_duplicate_adds(tmp_path):
     assert store.added_tids_since("s1", now + 1) == []
     # 不同服务互不影响
     assert store.added_tids_since("s2", now - 7 * 86400) == []
+
+
+def test_archive_torrent_and_list(tmp_path):
+    store = make_store(tmp_path)
+    now = int(time.time())
+    store.archive_torrent("s1", "h1", "被删的种子", 1024, 512, 2048,
+                          progress=0.5, added_on=now - 7200, reason="上传量不足", removed_at=now)
+    rows = store.archived_torrents("s1")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["name"] == "被删的种子"
+    assert row["uploaded"] == 2048 and row["downloaded"] == 512
+    assert row["removed_at"] == now
+    # 其他服务看不到
+    assert store.archived_torrents("s2") == []
+
+
+def test_counter_persists_across_reopen(tmp_path):
+    path = tmp_path / "state.db"
+    first = Store(path)
+    first.counter_add("s1", "added", 3)
+    first.counter_add("s1", "removed")
+    first.close()
+
+    second = Store(path)
+    assert second.counter_get("s1", "added") == 3
+    assert second.counter_get("s1", "removed") == 1
+    assert second.counter_get("s1", "missing") == 0
+    second.close()

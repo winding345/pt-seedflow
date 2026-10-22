@@ -42,6 +42,29 @@ CREATE TABLE IF NOT EXISTS added_history (
     ts      INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS torrent_archive (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    service     TEXT NOT NULL,
+    hash        TEXT,
+    name        TEXT,
+    size        INTEGER,
+    downloaded  INTEGER,
+    uploaded    INTEGER,
+    progress    REAL,
+    discount    TEXT,
+    added_on    INTEGER,
+    removed_at  INTEGER NOT NULL,
+    reason      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS counters (
+    service TEXT NOT NULL,
+    key     TEXT NOT NULL,
+    value   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (service, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_archive_lookup ON torrent_archive(service, removed_at);
 CREATE INDEX IF NOT EXISTS idx_added_lookup ON added_history(service, tid, ts);
 CREATE INDEX IF NOT EXISTS idx_samples_lookup ON upload_samples(service, hash, ts);
 CREATE INDEX IF NOT EXISTS idx_removal_lookup ON removal_history(service, tid, ts);
@@ -194,6 +217,52 @@ class Store:
                 (service, int(since_ts)),
             )
             return [str(row[0]) for row in cur.fetchall()]
+
+    # ---------- 已删除任务归档 ----------
+    def archive_torrent(self, service: str, hash_: str, name: str, size: int,
+                        downloaded: int, uploaded: int, progress: float,
+                        discount: str = "", added_on: Optional[int] = None,
+                        reason: str = "", removed_at: Optional[int] = None) -> None:
+        stamp = int(removed_at if removed_at is not None else time.time())
+        with self._cursor() as cur:
+            cur.execute(
+                "INSERT INTO torrent_archive(service, hash, name, size, downloaded, uploaded,"
+                " progress, discount, added_on, removed_at, reason)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (service, hash_, name, int(size), int(downloaded), int(uploaded),
+                 float(progress), discount, int(added_on or 0), stamp, reason),
+            )
+
+    def archived_torrents(self, service: str, limit: int = 200) -> List[dict]:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT name, size, downloaded, uploaded, progress, discount,"
+                " added_on, removed_at, reason FROM torrent_archive"
+                " WHERE service=? ORDER BY removed_at DESC LIMIT ?",
+                (service, int(limit)),
+            )
+            rows = cur.fetchall()
+        keys = ("name", "size", "downloaded", "uploaded", "progress",
+                "discount", "added_on", "removed_at", "reason")
+        return [dict(zip(keys, row)) for row in rows]
+
+    # ---------- 持久化计数 ----------
+    def counter_add(self, service: str, key: str, amount: int = 1) -> int:
+        with self._cursor() as cur:
+            cur.execute(
+                "INSERT INTO counters(service, key, value) VALUES (?,?,?)"
+                " ON CONFLICT(service, key) DO UPDATE SET value = value + ?",
+                (service, key, amount, amount),
+            )
+            cur.execute("SELECT value FROM counters WHERE service=? AND key=?", (service, key))
+            row = cur.fetchone()
+            return int(row[0]) if row else amount
+
+    def counter_get(self, service: str, key: str) -> int:
+        with self._cursor() as cur:
+            cur.execute("SELECT value FROM counters WHERE service=? AND key=?", (service, key))
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
 
     def close(self) -> None:
         with self._lock:

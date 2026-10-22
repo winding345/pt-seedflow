@@ -106,7 +106,11 @@ class QBittorrent:
                 dlspeed=int(row.get("dlspeed") or 0),
                 upspeed=int(row.get("upspeed") or 0),
                 uploaded=int(row.get("uploaded") or 0),
+                downloaded=int(row.get("downloaded") or 0),
+                num_seeds=int(row.get("num_seeds") or 0),
+                num_leechs=int(row.get("num_leechs") or 0),
                 added_on=int(row.get("added_on") or 0) or None,
+                last_activity=int(row.get("last_activity") or 0) or None,
                 category=str(row.get("category") or ""),
             ))
         return result
