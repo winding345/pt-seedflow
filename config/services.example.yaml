@@ -68,8 +68,8 @@ services:
 
 downloader:
   # qBittorrent Web API
-  # 容器内用 host.docker.internal 指向宿主机；直接跑在宿主机上则用 127.0.0.1
-  base_url: http://host.docker.internal:8085
+  # 容器使用 host 网络，与 qBittorrent 共享 127.0.0.1
+  base_url: http://127.0.0.1:8085
   # 若 qB 对来源 IP 免认证，可留空
   username: ""
   password: ""

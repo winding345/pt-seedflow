@@ -6,12 +6,10 @@ services:
       network: host
     image: pt-seedflow:latest
     container_name: pt-seedflow
+    # 使用 host 网络：qBittorrent 的"本机免认证"只对 127.0.0.1 生效，
+    # 桥接网络下容器来源 IP 会被拒（403）。
+    network_mode: host
     restart: unless-stopped
-    ports:
-      - "8600:8600"
-    extra_hosts:
-      # 容器内通过 host.docker.internal 访问宿主机上的 qBittorrent
-      - "host.docker.internal:host-gateway"
     environment:
       - TZ=Asia/Shanghai
     volumes:
