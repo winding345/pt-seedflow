@@ -1,6 +1,9 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      # 构建期复用宿主机网络：部分环境里构建容器 DNS 不可用
+      network: host
     image: pt-seedflow:latest
     container_name: pt-seedflow
     restart: unless-stopped
