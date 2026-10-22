@@ -33,21 +33,24 @@ class MTeamSite:
         self._key = cfg.resolve_key()
 
     # ---------- 底层请求 ----------
-    def _headers(self) -> Dict[str, str]:
-        return {
+    def _headers(self, with_body: bool = True) -> Dict[str, str]:
+        headers = {
             "User-Agent": self.cfg.user_agent,
             "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/json",
             "x-api-key": self._key,
         }
+        # 只带查询串的接口不要声明 JSON body，否则部分接口会判定参数错误
+        if with_body:
+            headers["Content-Type"] = "application/json"
+        return headers
 
     def _call(self, path: str, params: Optional[Dict[str, Any]] = None,
               body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         url = self.cfg.base_url + path
         if params:
             url = url + "?" + urlencode(params)
-        payload = json.dumps(body).encode("utf-8") if body is not None else b""
-        request = Request(url, data=payload, headers=self._headers(), method="POST")
+        payload = json.dumps(body).encode("utf-8") if body is not None else None
+        request = Request(url, data=payload, headers=self._headers(body is not None), method="POST")
         try:
             with urlopen(request, timeout=self.cfg.timeout) as resp:
                 raw = resp.read()
@@ -63,7 +66,11 @@ class MTeamSite:
 
         code = data.get("code")
         if str(code) != "0":
-            raise RuntimeError("m-team 业务错误 %s: %s" % (path, data.get("message")))
+            detail = "m-team 业务错误 %s" % path
+            if params:
+                detail += " 参数=%s" % urlencode(params)
+            detail += ": %s" % data.get("message")
+            raise RuntimeError(detail)
         return data
 
     # ---------- 对外能力 ----------

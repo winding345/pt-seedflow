@@ -149,6 +149,32 @@ def plan_adds(
     return AddPlan(picks, used, stop_reason)
 
 
+def verify_deletable(
+    torrents: Sequence[TorrentView],
+    targets: Sequence[Tuple[str, str]],
+    category: str,
+) -> List[Tuple[str, str]]:
+    """删除前的最后一道校验。
+
+    只有同时满足以下条件的任务才允许删除：
+    - hash 出现在当前 qB 列表里
+    - 该任务的分类与服务分类完全一致
+    - 任务名与记录的名字一致（防止列表漂移或 hash 碰撞）
+
+    返回确认可删的 (hash, name) 列表。
+    """
+    index = {t.hash: t for t in torrents if (t.category or "") == category}
+    verified: List[Tuple[str, str]] = []
+    for torrent_hash, name in targets:
+        current = index.get(torrent_hash)
+        if current is None:
+            continue
+        if current.name != name:
+            continue
+        verified.append((torrent_hash, current.name))
+    return verified
+
+
 def decide_delete(
     torrent: TorrentView,
     cfg: ServiceConfig,

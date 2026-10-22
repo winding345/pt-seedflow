@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Deque, Dict, List, Optional
 
 from .config import AppConfig, ServiceConfig
-from .lifecycle import AddPlan, Pick, decide_delete, plan_adds
+from .lifecycle import AddPlan, Pick, decide_delete, plan_adds, verify_deletable
 from .qb import QBError, QBittorrent
 from .scoring import Candidate
 from .store import Store
@@ -95,7 +95,7 @@ class ServiceRunner:
     def _step_delete(self, torrents) -> None:
         now = time.time()
         window = self.cfg.window_minutes * 60
-        to_delete: List[str] = []
+        targets: List[tuple] = []
 
         for torrent in torrents:
             self.store.add_sample(self.cfg.name, torrent.hash, torrent.uploaded, int(now))
@@ -111,14 +111,22 @@ class ServiceRunner:
             if self.cfg.dry_run:
                 self._log("would-delete", torrent.name, reason)
                 continue
-            to_delete.append(torrent.hash)
+            targets.append((torrent.hash, torrent.name))
             self._log("delete", torrent.name, reason)
 
-        if to_delete and not self.cfg.dry_run:
-            if self.qb.delete(to_delete, delete_files=True):
-                self.deleted_total += len(to_delete)
+        if targets and not self.cfg.dry_run:
+            # 删前再校验一次：hash + 名字 + 分类三重匹配，且必须是本服务分类
+            verified = verify_deletable(torrents, targets, self.cfg.category)
+            if len(verified) != len(targets):
+                self._log("error", "-", "校验后仅 %d/%d 个可删" % (len(verified), len(targets)))
+            if not verified:
+                return
+            hashes = [item[0] for item in verified]
+            if self.qb.delete(hashes, delete_files=True):
+                self.deleted_total += len(hashes)
+                self._log("deleted", "%d 个任务" % len(hashes), "已连同文件删除")
             else:
-                self._log("error", "-", "删除失败，共 %d 个" % len(to_delete))
+                self._log("error", "-", "删除失败，共 %d 个" % len(hashes))
 
     # ---------- 搜索 ----------
     def _step_search(self) -> None:

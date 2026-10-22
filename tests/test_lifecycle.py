@@ -172,3 +172,51 @@ def test_keep_when_samples_insufficient():
     cfg = service()
     ok, reason = decide_delete(torrent(age_min=200), cfg, time.time(), None)
     assert not ok and reason == "上传量样本不足"
+
+
+# ---------- 删除前的三重校验 ----------
+def test_verify_deletable_accepts_matching_entry():
+    from app.lifecycle import verify_deletable
+
+    t = torrent(hash_="abc")
+    t.name = "目标种子"
+    t.category = "svc"
+    assert verify_deletable([t], [("abc", "目标种子")], "svc") == [("abc", "目标种子")]
+
+
+def test_verify_deletable_rejects_name_mismatch():
+    from app.lifecycle import verify_deletable
+
+    t = torrent(hash_="abc")
+    t.name = "别的种子"
+    t.category = "svc"
+    assert verify_deletable([t], [("abc", "目标种子")], "svc") == []
+
+
+def test_verify_deletable_rejects_other_category():
+    from app.lifecycle import verify_deletable
+
+    t = torrent(hash_="abc")
+    t.name = "目标种子"
+    t.category = "别人的分类"
+    assert verify_deletable([t], [("abc", "目标种子")], "svc") == []
+
+
+def test_verify_deletable_rejects_missing_hash():
+    from app.lifecycle import verify_deletable
+
+    t = torrent(hash_="abc")
+    t.name = "目标种子"
+    t.category = "svc"
+    assert verify_deletable([t], [("deadbeef", "目标种子")], "svc") == []
+
+
+def test_verify_deletable_only_returns_verified_subset():
+    from app.lifecycle import verify_deletable
+
+    good = torrent(hash_="h1")
+    good.name, good.category = "A", "svc"
+    bad = torrent(hash_="h2")
+    bad.name, bad.category = "B", "other"
+    result = verify_deletable([good, bad], [("h1", "A"), ("h2", "B")], "svc")
+    assert result == [("h1", "A")]
