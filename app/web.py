@@ -78,6 +78,7 @@ async function fetchT(url, opts){
     clearTimeout(timer);
   }
 }
+let fails = 0;
 async function refresh(){
   try {
     const r = await fetchT('api/status');
@@ -108,9 +109,14 @@ async function refresh(){
         + '<button onclick="fire(\'' + esc(s.name) + '\',\'delete\')">手动删种</button></div>'
         + '</div>';
     }).join('');
+    fails = 0;
   } catch (e) {
+    fails++;
     document.getElementById('meta').textContent =
-      '无法获取状态（' + (e && e.name === 'AbortError' ? '请求超时' : e) + '），正在重试…';
+      '无法获取状态（' + (e && e.name === 'AbortError' ? '请求超时' : e) + '），第 ' +
+      fails + ' 次，' + (fails >= 3 ? '正在自动刷新…' : '稍后自动重试…');
+    // 连续 3 次失败就整页重载，避免永久卡死
+    if (fails >= 3) { setTimeout(() => location.reload(), 1500); }
   }
 }
 refresh();
@@ -125,8 +131,12 @@ def create_app(runners: List[ServiceRunner], started_at: float) -> FastAPI:
     app = FastAPI(title="pt-seedflow", docs_url=None, redoc_url=None)
 
     @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        return PAGE
+    def index() -> HTMLResponse:
+        # 禁止缓存：否则部署新前端后，浏览器可能仍用旧 JS
+        return HTMLResponse(PAGE, headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        })
 
     @app.post("/api/trigger")
     def trigger(payload: dict = Body(...)) -> JSONResponse:
