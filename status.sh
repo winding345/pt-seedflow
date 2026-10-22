@@ -9,6 +9,8 @@ echo "--- qB 地址 ---"
 grep -A2 '^downloader:' data/config.yaml | grep base_url || true
 echo "--- 容器 ---"
 docker compose ps --format '{{.Name}} {{.State}} {{.Ports}}' 2>/dev/null || true
+echo "--- 容器日志 ---"
+docker logs --tail 8 pt-seedflow 2>&1 | tail -8 || true
 echo "--- 状态接口 ---"
 curl -sS -m 5 http://127.0.0.1:8600/api/status | head -c 400 || echo "(未响应)"
 echo

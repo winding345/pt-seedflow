@@ -102,6 +102,7 @@ class ServiceRunner:
         with self._lock:
             self.last_error = ""
             done: List[str] = []
+            cfg_limit = max(self.cfg.max_torrents, self.cfg.add_per_tick)
             try:
                 torrents = self.qb.list_torrents(category=self.cfg.category)
                 self.used_bytes = sum(t.size for t in torrents)
@@ -119,7 +120,8 @@ class ServiceRunner:
                     if not self.candidates:
                         self._log("idle", "手动加种", "候选池为空，先等一次 search")
                     else:
-                        self._step_add(torrents)
+                        # 手动触发时一次性填满：上限交给空间与并发约束
+                        self._step_add(torrents, max_adds=cfg_limit)
                         done.append("add")
             except Exception as exc:  # noqa: BLE001
                 self.last_error = "%s: %s" % (type(exc).__name__, exc)
@@ -187,7 +189,7 @@ class ServiceRunner:
         self._log("search", "候选池", "%d 个候选" % len(candidates))
 
     # ---------- 加种 ----------
-    def _step_add(self, torrents) -> None:
+    def _step_add(self, torrents, max_adds: Optional[int] = None) -> None:
         if not self.candidates:
             return
 
@@ -214,6 +216,7 @@ class ServiceRunner:
             current_count=self.torrent_count,
             dl_left=left,
             exclude_tids=exclude,
+            max_adds=max_adds,
         )
 
         for pick in plan.picks:

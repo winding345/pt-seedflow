@@ -114,6 +114,7 @@ def plan_adds(
     current_count: int,
     dl_left: int,
     exclude_tids: Optional[Set[str]] = None,
+    max_adds: Optional[int] = None,
 ) -> AddPlan:
     """按剩余空间与配额挑选要加的种子，返回不可变的计划。"""
     if dl_left <= 0:
@@ -129,7 +130,8 @@ def plan_adds(
     stop_reason = "候选已用尽"
 
     for cand in ordered:
-        if len(picks) >= cfg.add_per_tick:
+        limit = cfg.add_per_tick if max_adds is None else max_adds
+        if len(picks) >= limit:
             stop_reason = "达到单轮上限"
             break
         if left <= 0:
