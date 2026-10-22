@@ -1,0 +1,27 @@
+# 运行时数据目录
+data/
+*.db
+*.sqlite3
+
+# 本地配置（含密钥），绝不入库
+config/config.yaml
+*.local.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+
+# 系统
+.DS_Store
+
+# uv 本地缓存（沙箱或受限环境用）
+.uv/

@@ -1,0 +1,75 @@
+# PT 刷流服务配置示例
+#
+# 首次启动会自动复制到 ~/.pt-seedflow/config.yaml
+# 复制后请修改 api_key_file 等参数，然后重启。
+# 所有密钥都从本文件或它指向的文件读取，代码中不含任何密钥。
+
+server:
+  host: 0.0.0.0
+  port: 8600
+  # 每多少秒执行一次主循环
+  tick_seconds: 300
+  # 每多少个 tick 执行一次 search（12 * 300s = 1 小时）
+  refresh_every_ticks: 12
+
+# 服务级默认值，可在单个 service 中覆盖
+defaults:
+  disk_gb: 50
+  # 单个种子在最近 window_minutes 内的上传量低于该值则删除
+  delete_threshold_mb: 1024
+  window_minutes: 60
+  # 新加种子多少分钟内不参与删除判定
+  exempt_minutes: 60
+  # 任何种子最少保留时间，避免"下完就跑"
+  min_keep_minutes: 120
+  max_torrents: 30
+  # 每个 tick 最多新增几个
+  add_per_tick: 2
+  # 站点额度保护，实际生效 = 站点上限 * safety
+  limits:
+    search_per_day: 1000
+    dl_per_day: 1000
+    safety: 0.9
+
+# 站点定义
+sites:
+  mteam:
+    base_url: https://api.m-team.cc
+    user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+    # 推荐指向宿主机上的密钥文件；也支持直接写 api_key
+    api_key_file: ~/.rss/m-team.api-key
+    timeout: 25
+
+services:
+  - name: auto-mteam-1
+    site: mteam
+    enabled: true
+    # 先设为 true 观察"想加什么、想删什么"，确认无误后改 false
+    dry_run: true
+
+    disk_gb: 50
+
+    # 只刷这些促销类型；留空表示接受所有非 NORMAL
+    discounts:
+      - FREE
+      - _2X_FREE
+
+    # 只刷这些分类；留空表示不限
+    categories: []
+
+    # 种子体积范围，单位 MB
+    size_mb: [1024, 102400]
+
+    # 传给 qB 的保存路径；留空则使用 qB 默认路径（不传该参数）
+    save_path: ""
+
+    # qB 分类名，同时作为服务隔离标识
+    category: auto-mteam-1
+
+downloader:
+  # qBittorrent Web API
+  base_url: http://127.0.0.1:8085
+  # 若 qB 对来源 IP 免认证，可留空
+  username: ""
+  password: ""
+  timeout: 20

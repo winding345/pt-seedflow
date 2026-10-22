@@ -1,0 +1,271 @@
+"""配置加载与校验。
+
+设计原则：
+- 代码里不含任何密钥；所有凭据来自 config.yaml 或其指向的文件。
+- 配置非法时拒绝启动，并给出可操作的中文错误信息。
+"""
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import yaml
+
+CONFIG_HOME = Path(os.environ.get("PT_SEEDFLOW_HOME", "~/.pt-seedflow")).expanduser()
+CONFIG_FILE = CONFIG_HOME / "config.yaml"
+STATE_DB = CONFIG_HOME / "state.db"
+
+
+class ConfigError(RuntimeError):
+    """配置不合法，无法启动。"""
+
+
+_ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _expand(value: Any) -> Any:
+    """展开 ${VAR} 与 ${VAR:-default}，便于 Docker 环境注入。"""
+    if isinstance(value, str):
+        def _sub(match: "re.Match[str]") -> str:
+            name, default = match.group(1), match.group(2)
+            resolved = os.environ.get(name, default)
+            if resolved is None:
+                raise ConfigError("配置引用了未设置的环境变量 %s" % name)
+            return resolved
+        return _ENV_RE.sub(_sub, value)
+    if isinstance(value, list):
+        return [_expand(item) for item in value]
+    if isinstance(value, dict):
+        return {k: _expand(v) for k, v in value.items()}
+    return value
+
+
+@dataclass
+class Limits:
+    search_per_day: int = 1000
+    dl_per_day: int = 1000
+    safety: float = 0.9
+
+    @property
+    def search_cap(self) -> int:
+        return max(1, int(self.search_per_day * self.safety))
+
+    @property
+    def dl_cap(self) -> int:
+        return max(1, int(self.dl_per_day * self.safety))
+
+
+@dataclass
+class SiteConfig:
+    name: str
+    base_url: str
+    user_agent: str
+    api_key: str = ""
+    api_key_file: str = ""
+    timeout: int = 25
+
+    def resolve_key(self) -> str:
+        """优先使用 api_key，其次读文件；两者都没有则报错。"""
+        if self.api_key:
+            return self.api_key.strip()
+        if self.api_key_file:
+            path = Path(self.api_key_file).expanduser()
+            if not path.is_file():
+                raise ConfigError("site %s 的 api_key_file 不存在: %s" % (self.name, path))
+            key = path.read_text(encoding="utf-8").strip()
+            if not key:
+                raise ConfigError("site %s 的 api_key_file 内容为空: %s" % (self.name, path))
+            return key
+        raise ConfigError("site %s 未配置 api_key 或 api_key_file" % self.name)
+
+
+@dataclass
+class DownloaderConfig:
+    base_url: str = "http://127.0.0.1:8085"
+    username: str = ""
+    password: str = ""
+    timeout: int = 20
+
+
+@dataclass
+class ServiceConfig:
+    name: str
+    site: str
+    enabled: bool = True
+    dry_run: bool = True
+    disk_gb: float = 50
+    discounts: List[str] = field(default_factory=list)
+    categories: List[int] = field(default_factory=list)
+    size_mb: List[float] = field(default_factory=lambda: [1024, 102400])
+    save_path: str = ""
+    category: str = ""
+    delete_threshold_mb: float = 1024
+    window_minutes: int = 60
+    exempt_minutes: int = 60
+    min_keep_minutes: int = 120
+    max_torrents: int = 30
+    add_per_tick: int = 2
+    limits: Limits = field(default_factory=Limits)
+
+    @property
+    def disk_bytes(self) -> int:
+        return int(self.disk_gb * 1024 ** 3)
+
+    @property
+    def threshold_bytes(self) -> int:
+        return int(self.delete_threshold_mb * 1024 ** 2)
+
+    @property
+    def size_bytes_range(self) -> "tuple[int, int]":
+        low, high = self.size_mb[0], self.size_mb[1]
+        return int(low * 1024 ** 2), int(high * 1024 ** 2)
+
+    def allows_discount(self, discount: Optional[str]) -> bool:
+        value = (discount or "NORMAL").strip()
+        if value in ("", "NORMAL"):
+            return False
+        if not self.discounts:
+            return True
+        return value in self.discounts
+
+
+@dataclass
+class AppConfig:
+    host: str
+    port: int
+    tick_seconds: int
+    refresh_every_ticks: int
+    sites: Dict[str, SiteConfig]
+    services: List[ServiceConfig]
+    downloader: DownloaderConfig
+
+
+def _require(mapping: Dict[str, Any], key: str, where: str) -> Any:
+    if key not in mapping or mapping[key] in (None, ""):
+        raise ConfigError("%s 缺少必填项 %s" % (where, key))
+    return mapping[key]
+
+
+def load_config(path: Optional[Path] = None) -> AppConfig:
+    """读取并校验配置；任何不合法都抛 ConfigError。"""
+    target = Path(path) if path else CONFIG_FILE
+    if not target.is_file():
+        raise ConfigError("配置文件不存在: %s" % target)
+
+    try:
+        raw = yaml.safe_load(target.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigError("配置文件不是合法 YAML: %s" % exc)
+
+    if not isinstance(raw, dict):
+        raise ConfigError("配置文件顶层必须是映射结构")
+
+    raw = _expand(raw)
+
+    server = raw.get("server") or {}
+    defaults = raw.get("defaults") or {}
+    limits_raw = defaults.get("limits") or {}
+
+    limits = Limits(
+        search_per_day=int(limits_raw.get("search_per_day", 1000)),
+        dl_per_day=int(limits_raw.get("dl_per_day", 1000)),
+        safety=float(limits_raw.get("safety", 0.9)),
+    )
+    if not 0 < limits.safety <= 1:
+        raise ConfigError("defaults.limits.safety 必须位于 (0, 1] 区间")
+
+    sites_raw = raw.get("sites") or {}
+    if not isinstance(sites_raw, dict) or not sites_raw:
+        raise ConfigError("至少需要配置一个 site")
+
+    sites: Dict[str, SiteConfig] = {}
+    for name, cfg in sites_raw.items():
+        if not isinstance(cfg, dict):
+            raise ConfigError("site %s 必须是映射结构" % name)
+        sites[name] = SiteConfig(
+            name=name,
+            base_url=str(_require(cfg, "base_url", "site %s" % name)).rstrip("/"),
+            user_agent=str(cfg.get("user_agent") or "Mozilla/5.0"),
+            api_key=str(cfg.get("api_key") or ""),
+            api_key_file=str(cfg.get("api_key_file") or ""),
+            timeout=int(cfg.get("timeout", 25)),
+        )
+        # 提前校验密钥可用，避免服务跑起来才发现
+        sites[name].resolve_key()
+
+    services_raw = raw.get("services") or []
+    if not isinstance(services_raw, list) or not services_raw:
+        raise ConfigError("至少需要配置一个 service")
+
+    services: List[ServiceConfig] = []
+    seen = set()
+    for item in services_raw:
+        if not isinstance(item, dict):
+            raise ConfigError("service 条目必须是映射结构")
+        name = str(_require(item, "name", "service"))
+        if name in seen:
+            raise ConfigError("service 名称重复: %s" % name)
+        seen.add(name)
+
+        site = str(_require(item, "site", "service %s" % name))
+        if site not in sites:
+            raise ConfigError("service %s 引用了未定义的 site: %s" % (name, site))
+
+        merged = dict(defaults)
+        merged.pop("limits", None)
+        merged.update(item)
+
+        size_mb = merged.get("size_mb", [1024, 102400])
+        if not isinstance(size_mb, list) or len(size_mb) != 2:
+            raise ConfigError("service %s 的 size_mb 必须是两个元素的数组" % name)
+        if float(size_mb[0]) > float(size_mb[1]):
+            raise ConfigError("service %s 的 size_mb 下限不能大于上限" % name)
+
+        service = ServiceConfig(
+            name=name,
+            site=site,
+            enabled=bool(merged.get("enabled", True)),
+            dry_run=bool(merged.get("dry_run", True)),
+            disk_gb=float(merged.get("disk_gb", 50)),
+            discounts=[str(x) for x in (merged.get("discounts") or [])],
+            categories=[int(x) for x in (merged.get("categories") or [])],
+            size_mb=[float(size_mb[0]), float(size_mb[1])],
+            save_path=str(merged.get("save_path") or ""),
+            category=str(merged.get("category") or name),
+            delete_threshold_mb=float(merged.get("delete_threshold_mb", 1024)),
+            window_minutes=int(merged.get("window_minutes", 60)),
+            exempt_minutes=int(merged.get("exempt_minutes", 60)),
+            min_keep_minutes=int(merged.get("min_keep_minutes", 120)),
+            max_torrents=int(merged.get("max_torrents", 30)),
+            add_per_tick=int(merged.get("add_per_tick", 2)),
+            limits=limits,
+        )
+        if service.disk_gb <= 0:
+            raise ConfigError("service %s 的 disk_gb 必须大于 0" % name)
+        if service.max_torrents <= 0:
+            raise ConfigError("service %s 的 max_torrents 必须大于 0" % name)
+        services.append(service)
+
+    if not any(s.enabled for s in services):
+        raise ConfigError("所有 service 都是 enabled: false，没有可运行的服务")
+
+    downloader_raw = raw.get("downloader") or {}
+    downloader = DownloaderConfig(
+        base_url=str(downloader_raw.get("base_url") or "http://127.0.0.1:8085").rstrip("/"),
+        username=str(downloader_raw.get("username") or ""),
+        password=str(downloader_raw.get("password") or ""),
+        timeout=int(downloader_raw.get("timeout", 20)),
+    )
+
+    return AppConfig(
+        host=str(server.get("host", "0.0.0.0")),
+        port=int(server.get("port", 8600)),
+        tick_seconds=int(server.get("tick_seconds", 300)),
+        refresh_every_ticks=int(server.get("refresh_every_ticks", 12)),
+        sites=sites,
+        services=services,
+        downloader=downloader,
+    )

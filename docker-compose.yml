@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    image: pt-seedflow:latest
+    container_name: pt-seedflow
+    # 使用 host 网络，容器内可直接访问 127.0.0.1 上的 qBittorrent，
+    # 从而继续沿用 qB 的"本机免认证"规则。
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      # 配置与状态库；首次启动会在宿主机生成 config.yaml
+      - ${HOME}/.pt-seedflow:/root/.pt-seedflow
+      # 站点 api key，只读挂载，路径与示例配置保持一致
+      - ${HOME}/.rss:/root/.rss:ro

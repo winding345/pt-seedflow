@@ -1,0 +1,22 @@
+[project]
+name = "pt-seedflow"
+version = "0.1.0"
+description = "PT 刷流服务：按磁盘配额自动选种、加种、淘汰，多站点适配，带 Web 面板"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
