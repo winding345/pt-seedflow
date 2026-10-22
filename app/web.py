@@ -51,19 +51,36 @@ PAGE = """<!doctype html>
 <script>
 async function fire(name, action){
   if(!confirm('确认对 ' + name + ' 执行手动' + (action==='add'?'加种':'删种') + '？')) return;
-  const r = await fetch('api/trigger', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({service:name, action:action})
-  });
+  let r;
+  try {
+    r = await fetchT('api/trigger', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({service:name, action:action})
+    });
+  } catch(e) {
+    alert('请求超时或失败：' + e);
+    return;
+  }
   const d = await r.json().catch(()=>({error:'响应解析失败'}));
   if(d.error) alert(d.error);
   refresh();
 }
 function fmt(sec){ if(sec<=0) return "即将"; var m=Math.floor(sec/60); return m+" 分钟后"; }
 function esc(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+async function fetchT(url, opts){
+  // 5 秒超时：容器重启时旧请求会被切断，没有超时就会永远停在"加载中"
+  opts = opts || {};
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    return await fetch(url, Object.assign({cache:'no-store', signal: ctrl.signal}, opts));
+  } finally {
+    clearTimeout(timer);
+  }
+}
 async function refresh(){
   try {
-    const r = await fetch('api/status', {cache:'no-store'});
+    const r = await fetchT('api/status');
     const d = await r.json();
     document.getElementById('meta').textContent =
       '运行 ' + d.uptime_human + ' · 共 ' + d.services.length + ' 个服务 · ' + new Date().toLocaleTimeString();
@@ -92,7 +109,8 @@ async function refresh(){
         + '</div>';
     }).join('');
   } catch (e) {
-    document.getElementById('meta').textContent = '无法获取状态: ' + e;
+    document.getElementById('meta').textContent =
+      '无法获取状态（' + (e && e.name === 'AbortError' ? '请求超时' : e) + '），正在重试…';
   }
 }
 refresh();
