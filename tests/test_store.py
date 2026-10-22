@@ -80,3 +80,15 @@ def test_state_survives_reopen(tmp_path):
     second = Store(path)
     assert second.quota_used("s1", "dl", "2026-10-22") == 3
     second.close()
+
+
+def test_added_history_prevents_duplicate_adds(tmp_path):
+    store = make_store(tmp_path)
+    now = int(time.time())
+    store.mark_added("s1", "1275479", "某剧 S01E01", now)
+    recent = store.added_tids_since("s1", now - 7 * 86400)
+    assert recent == ["1275479"]
+    # 窗口外的老记录不再拦截
+    assert store.added_tids_since("s1", now + 1) == []
+    # 不同服务互不影响
+    assert store.added_tids_since("s2", now - 7 * 86400) == []

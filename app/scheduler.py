@@ -199,8 +199,12 @@ class ServiceRunner:
             self._log("quota", "dl", "每日额度已用尽 %d/%d" % (used, cap))
             return
 
-        current_tids = {t.name for t in torrents}
+        current_names = {t.name for t in torrents}
+        # 近期已加过的 tid 与已删过的 tid 都要排除，避免重复消耗下载配额
+        added_before = set(self.store.added_tids_since(
+            self.cfg.name, int(time.time()) - 7 * 86400))
         removed = set(self.store.removed_tids_since(self.cfg.name, int(time.time()) - 86400))
+        exclude = added_before | removed
 
         plan: AddPlan = plan_adds(
             candidates=self.candidates,
@@ -209,11 +213,11 @@ class ServiceRunner:
             used_bytes=self.used_bytes,
             current_count=self.torrent_count,
             dl_left=left,
-            exclude_tids=removed,
+            exclude_tids=exclude,
         )
 
         for pick in plan.picks:
-            if pick.candidate.name in current_tids:
+            if pick.candidate.name in current_names:
                 continue
             if self.cfg.dry_run:
                 self._log("would-add", pick.candidate.name,
@@ -236,12 +240,21 @@ class ServiceRunner:
             )
             if ok:
                 self.added_total += 1
+                self.store.mark_added(self.cfg.name, pick.candidate.tid, pick.candidate.name)
                 self.used_bytes += pick.candidate.size
                 self.torrent_count += 1
                 self._log("add", pick.candidate.name,
                           "%.2fGB %s" % (pick.candidate.size / 1024 ** 3, pick.candidate.discount))
             else:
                 self._log("error", pick.candidate.name, "qB 拒绝添加")
+
+        # 加种后以 qB 为准对账：qB 会按 infohash 去重，站点标题与 qB 名称也可能不同
+        try:
+            torrents = self.qb.list_torrents(category=self.cfg.category)
+            self.used_bytes = sum(t.size for t in torrents)
+            self.torrent_count = len(torrents)
+        except QBError:
+            pass
 
         if plan.stop_reason and not plan.picks:
             self._log("idle", "本轮未加种", plan.stop_reason)

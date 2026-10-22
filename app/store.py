@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS removal_history (
     ts      INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS added_history (
+    service TEXT NOT NULL,
+    tid     TEXT NOT NULL,
+    name    TEXT,
+    ts      INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_added_lookup ON added_history(service, tid, ts);
 CREATE INDEX IF NOT EXISTS idx_samples_lookup ON upload_samples(service, hash, ts);
 CREATE INDEX IF NOT EXISTS idx_removal_lookup ON removal_history(service, tid, ts);
 """
@@ -166,6 +174,23 @@ class Store:
         with self._cursor() as cur:
             cur.execute(
                 "SELECT DISTINCT tid FROM removal_history WHERE service=? AND ts >= ?",
+                (service, int(since_ts)),
+            )
+            return [str(row[0]) for row in cur.fetchall()]
+
+    # ---------- 加入历史（按 tid 判重，避免重复消耗配额） ----------
+    def mark_added(self, service: str, tid: str, name: str, ts: Optional[int] = None) -> None:
+        stamp = int(ts if ts is not None else time.time())
+        with self._cursor() as cur:
+            cur.execute(
+                "INSERT INTO added_history(service, tid, name, ts) VALUES (?,?,?,?)",
+                (service, str(tid), name, stamp),
+            )
+
+    def added_tids_since(self, service: str, since_ts: int) -> List[str]:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT tid FROM added_history WHERE service=? AND ts >= ?",
                 (service, int(since_ts)),
             )
             return [str(row[0]) for row in cur.fetchall()]
