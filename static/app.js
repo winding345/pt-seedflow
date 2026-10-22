@@ -152,6 +152,7 @@ const COLUMNS = [
   ['上传速度', row => speed(row.upspeed)],
   ['添加时间', row => ts(row.added_on)],
   ['最近活跃', row => ts(row.last_activity)],
+  ['促销结束', row => ts(row.discount_end)],
 ];
 
 function tableHtml(rows) {

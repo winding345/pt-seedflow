@@ -131,26 +131,38 @@ def plan_adds(
     used = used_bytes
     count = current_count
     left = dl_left
-    stop_reason = "候选已用尽"
+    stop_reason = "没有符合条件的新候选"
+    no_space = 0
+    broke = False
 
     for cand in ordered:
         limit = cfg.add_per_tick if max_adds is None else max_adds
         if len(picks) >= limit:
             stop_reason = "达到单轮上限"
+            broke = True
             break
         if left <= 0:
             stop_reason = "配额耗尽"
+            broke = True
             break
         if count >= cfg.max_torrents:
             stop_reason = "达到并发上限"
+            broke = True
             break
         if used + cand.size > cfg.disk_bytes:
             # 体积不合适就跳过，继续看更小的
+            no_space += 1
             continue
         picks.append(Pick(cand, score(cand, now)))
         used += cand.size
         count += 1
         left -= 1
+
+    if not broke:
+        if picks:
+            stop_reason = "候选已遍历完，本批添加 %d 个" % len(picks)
+        elif no_space:
+            stop_reason = "剩余空间不足（%d 个候选装不下）" % no_space
 
     return AddPlan(picks, used, stop_reason)
 
@@ -187,12 +199,18 @@ def decide_delete(
     now: float,
     upload_window_bytes: Optional[int],
     previous_progress: Optional[float] = None,
+    discount_end: Optional[int] = None,
 ) -> Tuple[bool, str]:
     """判断某个任务是否该删；返回(是否删除, 原因)。"""
     age = (now - torrent.added_on) / 60.0 if torrent.added_on else 0.0
 
     if age < cfg.exempt_minutes:
         return False, "豁免期内"
+
+    # 未下完但促销已结束：继续下载会消耗真实下载量，直接淘汰
+    if (cfg.delete_unfinished_after_discount and not torrent.completed
+            and discount_end and now > discount_end):
+        return True, "促销已结束且未下完"
 
     if not torrent.completed:
         progress_moving = (

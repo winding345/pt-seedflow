@@ -66,6 +66,11 @@ services:
     # qB 分类名，同时作为服务隔离标识
     category: auto-mteam-1
 
+    # 未下完但促销已结束 → 删除该种子（默认 true，设为 false 可关闭）
+    delete_unfinished_after_discount: true
+    # search 强制最小间隔（秒），默认 1 小时
+    search_interval_seconds: 3600
+
 downloader:
   # qBittorrent Web API
   # 容器使用 host 网络，与 qBittorrent 共享 127.0.0.1

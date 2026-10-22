@@ -57,6 +57,23 @@ CREATE TABLE IF NOT EXISTS torrent_archive (
     reason      TEXT
 );
 
+CREATE TABLE IF NOT EXISTS torrent_meta (
+    service      TEXT NOT NULL,
+    hash         TEXT NOT NULL,
+    tid          TEXT,
+    discount     TEXT,
+    discount_end INTEGER,
+    added_at     INTEGER,
+    PRIMARY KEY (service, hash)
+);
+
+CREATE TABLE IF NOT EXISTS service_state (
+    service TEXT NOT NULL,
+    key     TEXT NOT NULL,
+    value   INTEGER NOT NULL,
+    PRIMARY KEY (service, key)
+);
+
 CREATE TABLE IF NOT EXISTS counters (
     service TEXT NOT NULL,
     key     TEXT NOT NULL,
@@ -79,7 +96,17 @@ class Store:
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """给旧库补列，保持向后兼容。"""
+        cur = self._conn.cursor()
+        cur.execute("PRAGMA table_info(torrent_archive)")
+        columns = {row[1] for row in cur.fetchall()}
+        if "discount_end" not in columns:
+            cur.execute("ALTER TABLE torrent_archive ADD COLUMN discount_end INTEGER")
+        cur.close()
 
     @contextmanager
     def _cursor(self) -> Iterator[sqlite3.Cursor]:
@@ -222,29 +249,70 @@ class Store:
     def archive_torrent(self, service: str, hash_: str, name: str, size: int,
                         downloaded: int, uploaded: int, progress: float,
                         discount: str = "", added_on: Optional[int] = None,
-                        reason: str = "", removed_at: Optional[int] = None) -> None:
+                        reason: str = "", removed_at: Optional[int] = None,
+                        discount_end: Optional[int] = None) -> None:
         stamp = int(removed_at if removed_at is not None else time.time())
         with self._cursor() as cur:
             cur.execute(
                 "INSERT INTO torrent_archive(service, hash, name, size, downloaded, uploaded,"
-                " progress, discount, added_on, removed_at, reason)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " progress, discount, added_on, removed_at, reason, discount_end)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (service, hash_, name, int(size), int(downloaded), int(uploaded),
-                 float(progress), discount, int(added_on or 0), stamp, reason),
+                 float(progress), discount, int(added_on or 0), stamp, reason,
+                 int(discount_end) if discount_end else None),
             )
 
     def archived_torrents(self, service: str, limit: int = 200) -> List[dict]:
         with self._cursor() as cur:
             cur.execute(
                 "SELECT name, size, downloaded, uploaded, progress, discount,"
-                " added_on, removed_at, reason FROM torrent_archive"
+                " added_on, removed_at, reason, discount_end FROM torrent_archive"
                 " WHERE service=? ORDER BY removed_at DESC LIMIT ?",
                 (service, int(limit)),
             )
             rows = cur.fetchall()
         keys = ("name", "size", "downloaded", "uploaded", "progress",
-                "discount", "added_on", "removed_at", "reason")
+                "discount", "added_on", "removed_at", "reason", "discount_end")
         return [dict(zip(keys, row)) for row in rows]
+
+    # ---------- 种子元数据（促销截止等） ----------
+    def set_meta(self, service: str, hash_: str, tid: str, discount: str,
+                 discount_end: Optional[int], added_at: Optional[int] = None) -> None:
+        with self._cursor() as cur:
+            cur.execute(
+                "INSERT INTO torrent_meta(service, hash, tid, discount, discount_end, added_at)"
+                " VALUES (?,?,?,?,?,?) ON CONFLICT(service, hash) DO UPDATE SET"
+                " tid=excluded.tid, discount=excluded.discount,"
+                " discount_end=excluded.discount_end",
+                (service, hash_, str(tid), discount,
+                 int(discount_end) if discount_end else None,
+                 int(added_at or time.time())),
+            )
+
+    def meta_map(self, service: str) -> dict:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT hash, tid, discount, discount_end, added_at FROM torrent_meta"
+                " WHERE service=?", (service,))
+            rows = cur.fetchall()
+        return {row[0]: {"tid": row[1], "discount": row[2],
+                         "discount_end": row[3], "added_at": row[4]} for row in rows}
+
+    # ---------- 服务级键值（如上次 search 时间） ----------
+    def kv_set(self, service: str, key: str, value: int) -> None:
+        with self._cursor() as cur:
+            cur.execute(
+                "INSERT INTO service_state(service, key, value) VALUES (?,?,?)"
+                " ON CONFLICT(service, key) DO UPDATE SET value=excluded.value",
+                (service, key, int(value)),
+            )
+
+    def kv_get(self, service: str, key: str, default: int = 0) -> int:
+        with self._cursor() as cur:
+            cur.execute("SELECT value FROM service_state WHERE service=? AND key=?",
+                        (service, key))
+            row = cur.fetchone()
+        return int(row[0]) if row else default
 
     # ---------- 持久化计数 ----------
     def counter_add(self, service: str, key: str, amount: int = 1) -> int:

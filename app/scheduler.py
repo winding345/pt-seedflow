@@ -158,11 +158,24 @@ class ServiceRunner:
             return {"service": self.cfg.name, "action": action,
                     "done": done, "snapshot": self.snapshot()}
 
+    def _reconcile_new_hash(self, known_hashes) -> Optional[str]:
+        """加种后 qB 才分配 hash：对比前后列表，找出新增的那个。"""
+        try:
+            current = self.qb.list_torrents(category=self.cfg.category)
+        except QBError:
+            return None
+        for torrent in current:
+            if torrent.hash not in known_hashes:
+                return torrent.hash
+        return None
+
     # ---------- 删除 ----------
     def _step_delete(self, torrents) -> None:
         now = time.time()
         window = self.cfg.window_minutes * 60
+        meta = self.store.meta_map(self.cfg.name)
         targets: List[tuple] = []
+        reason_for: Dict[str, str] = {}
 
         for torrent in torrents:
             self.store.add_sample(self.cfg.name, torrent.hash, torrent.uploaded, int(now))
@@ -170,7 +183,10 @@ class ServiceRunner:
                 self.cfg.name, torrent.hash, int(now - window))
 
             previous = self._progress.get(torrent.hash)
-            remove, reason = decide_delete(torrent, self.cfg, now, window_bytes, previous)
+            info = meta.get(torrent.hash) or {}
+            remove, reason = decide_delete(
+                torrent, self.cfg, now, window_bytes, previous,
+                discount_end=info.get("discount_end"))
             self._progress[torrent.hash] = torrent.progress
 
             if not remove:
@@ -179,6 +195,7 @@ class ServiceRunner:
                 self._log("would-delete", torrent.name, reason)
                 continue
             targets.append((torrent.hash, torrent.name))
+            reason_for[torrent.hash] = reason
             self._log("delete", torrent.name, reason)
 
         if targets and not self.cfg.dry_run:
@@ -204,7 +221,9 @@ class ServiceRunner:
                         uploaded=snap.uploaded if snap else 0,
                         progress=snap.progress if snap else 0.0,
                         added_on=snap.added_on if snap else None,
-                        reason="上传量不足",
+                        reason=reason_for.get(item_hash, ""),
+                        discount=(meta.get(item_hash) or {}).get("discount", ""),
+                        discount_end=(meta.get(item_hash) or {}).get("discount_end"),
                         removed_at=now_ts,
                     )
                     self._prev.pop(item_hash, None)
@@ -215,6 +234,15 @@ class ServiceRunner:
 
     # ---------- 搜索 ----------
     def _step_search(self) -> None:
+        # 强制最小间隔：即使重启或 tick 计数被重置，也不会多刷
+        last_ts = self.store.kv_get(self.cfg.name, "last_search_ts", 0)
+        elapsed = time.time() - last_ts
+        if last_ts and elapsed < self.cfg.search_interval_seconds:
+            self._log("idle", "跳过 search",
+                      "距上次仅 %d 秒（下限 %d 秒）" % (elapsed, self.cfg.search_interval_seconds))
+            self.ticks_since_search = 0
+            return
+
         cap = self.cfg.limits.search_cap
         used = self.store.quota_used(self.cfg.name, "search", today())
         if used >= cap:
@@ -229,6 +257,7 @@ class ServiceRunner:
             return
 
         self.store.quota_add(self.cfg.name, "search", today())
+        self.store.kv_set(self.cfg.name, "last_search_ts", int(time.time()))
         self.candidates = candidates
         self.last_search_at = time.time()
         self.ticks_since_search = 0
@@ -248,6 +277,7 @@ class ServiceRunner:
             return
 
         current_names = {t.name for t in torrents}
+        known_hashes = {t.hash for t in torrents}
         # 近期已加过的 tid 与已删过的 tid 都要排除，避免重复消耗下载配额
         added_before = set(self.store.added_tids_since(
             self.cfg.name, int(time.time()) - 7 * 86400))
@@ -291,6 +321,12 @@ class ServiceRunner:
                 self.added_total += 1
                 self.store.counter_add(self.cfg.name, "added")
                 self.store.mark_added(self.cfg.name, pick.candidate.tid, pick.candidate.name)
+                new_hash = self._reconcile_new_hash(known_hashes)
+                if new_hash:
+                    known_hashes.add(new_hash)
+                    self.store.set_meta(
+                        self.cfg.name, new_hash, pick.candidate.tid,
+                        pick.candidate.discount, pick.candidate.discount_end)
                 self.used_bytes += pick.candidate.size
                 self.torrent_count += 1
                 self._log("add", pick.candidate.name,
@@ -369,6 +405,7 @@ class ServiceRunner:
         """详情页数据：运行中的任务 + 已删除的归档。"""
         now = time.time() if now is None else now
         window_start = int(now - 3600)
+        meta = self.store.meta_map(self.cfg.name)
         active = []
         for t in self.torrents_cache:
             ratio = (t.uploaded / t.downloaded) if t.downloaded else 0.0
@@ -387,6 +424,8 @@ class ServiceRunner:
                 "added_on": t.added_on or 0,
                 "last_activity": t.last_activity or 0,
                 "state": t.state,
+                "discount": (meta.get(t.hash) or {}).get("discount", ""),
+                "discount_end": (meta.get(t.hash) or {}).get("discount_end"),
             })
         removed = []
         for row in self.store.archived_torrents(self.cfg.name):
@@ -407,6 +446,8 @@ class ServiceRunner:
                 "last_activity": row["removed_at"] or 0,
                 "state": "removed",
                 "removed_at": row["removed_at"],
+                "discount": row.get("discount") or "",
+                "discount_end": row.get("discount_end"),
             })
         return {"active": active, "removed": removed}
 

@@ -108,6 +108,10 @@ class ServiceConfig:
     min_keep_minutes: int = 120
     max_torrents: int = 30
     add_per_tick: int = 2
+    # 未下完但促销已结束 → 删除
+    delete_unfinished_after_discount: bool = True
+    # search 强制最小间隔（秒）
+    search_interval_seconds: int = 3600
     limits: Limits = field(default_factory=Limits)
 
     @property
@@ -241,6 +245,9 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
             min_keep_minutes=int(merged.get("min_keep_minutes", 120)),
             max_torrents=int(merged.get("max_torrents", 30)),
             add_per_tick=int(merged.get("add_per_tick", 2)),
+            delete_unfinished_after_discount=bool(
+                merged.get("delete_unfinished_after_discount", True)),
+            search_interval_seconds=int(merged.get("search_interval_seconds", 3600)),
             limits=limits,
         )
         if service.disk_gb <= 0:

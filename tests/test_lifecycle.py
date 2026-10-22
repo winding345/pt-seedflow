@@ -220,3 +220,44 @@ def test_verify_deletable_only_returns_verified_subset():
     bad.name, bad.category = "B", "other"
     result = verify_deletable([good, bad], [("h1", "A"), ("h2", "B")], "svc")
     assert result == [("h1", "A")]
+
+
+# ---------- 未下完但促销结束 ----------
+def test_delete_unfinished_when_discount_expired():
+    cfg = service()
+    now = time.time()
+    t = torrent(progress=0.4, age_min=180, dlspeed=1024)
+    ok, reason = decide_delete(t, cfg, now, 0, None, discount_end=int(now - 60))
+    assert ok and "促销已结束" in reason
+
+
+def test_keep_unfinished_when_discount_active():
+    cfg = service()
+    now = time.time()
+    t = torrent(progress=0.4, age_min=180, dlspeed=1024)
+    ok, reason = decide_delete(t, cfg, now, 0, None, discount_end=int(now + 3600))
+    assert not ok and reason == "下载中"
+
+
+def test_switch_off_keeps_unfinished_after_discount():
+    cfg = service(delete_unfinished_after_discount=False)
+    now = time.time()
+    t = torrent(progress=0.4, age_min=180, dlspeed=1024)
+    ok, reason = decide_delete(t, cfg, now, 0, None, discount_end=int(now - 60))
+    assert not ok and reason == "下载中"
+
+
+def test_finished_torrent_not_affected_by_discount_rule():
+    cfg = service()
+    now = time.time()
+    t = torrent(progress=1.0, age_min=200)
+    ok, reason = decide_delete(t, cfg, now, 2 * 1024 ** 3, None, discount_end=int(now - 60))
+    assert not ok and reason == "达标"
+
+
+def test_plan_reports_space_shortage():
+    cfg = service(disk_gb=5, add_per_tick=3)
+    plan = plan_adds([cand("big", size=8 * 1024 ** 3)], cfg, time.time(),
+                     used_bytes=0, current_count=0, dl_left=5)
+    assert plan.picks == []
+    assert "空间不足" in plan.stop_reason
