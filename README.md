@@ -123,7 +123,9 @@ app/
   store.py         SQLite：配额、上传量采样、删除历史
   scoring.py       候选打分
   lifecycle.py     加种/删除决策（纯函数）
-  sites/           站点适配（当前 m-team）
+  sites/           站点适配层
+    base.py        通用接口（SiteAdapter）与 HTTP 底座
+    mteam/         m-team 实现：client（API）/ parser（解析）
   qb.py            qBittorrent 客户端
   scheduler.py     调度与状态快照
   web.py           Web 面板
@@ -150,6 +152,44 @@ bash deploy.sh    # 只构建启动，不碰 git
 ```
 
 `deploy.sh` 刻意不包含任何网络拉取动作，避免网络故障时整条部署流程卡死。
+
+
+## 新增站点（示例：pttime）
+
+调度、选种、配额、删除这些逻辑与站点无关，新增站点只需要实现一个适配器：
+
+```python
+# app/sites/pttime/__init__.py
+from .. import register
+from ..base import SiteAdapter
+
+@register("pttime")          # 配置里写 site: pttime 就会用到它
+class PTTimesite(SiteAdapter):
+    def search(self, page=1, page_size=100):
+        ...                  # 返回 List[Candidate]
+
+    def genlink(self, tid):
+        ...                  # 返回可直接交给 qB 的下载链接
+```
+
+要点：
+
+- `search` 负责把站点数据归一化成 `Candidate`（名称、体积、促销、促销截止时间、做种/下载数、发布时间）
+- `genlink` 负责把种子 id 换成下载链接；NexusPHP 类站点通常用 passkey 拼固定 URL，不需要 API
+- 促销没有明确结束时间时，`discount_end` 必须是 `None`，删除逻辑会把它当作"长期有效"
+
+配置里加一段即可启用：
+
+```yaml
+sites:
+  pttime:
+    base_url: https://example.pttime.org
+    api_key_file: ~/.pt-seedflow/pttime.passkey
+services:
+  - name: auto-pttime-1
+    site: pttime
+    dry_run: true
+```
 
 ## 已知边界
 

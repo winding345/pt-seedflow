@@ -90,3 +90,16 @@ def test_trigger_endpoint():
     resp = client().post("/api/trigger", json={"service": "auto-test", "action": "add"})
     assert resp.status_code == 200
     assert resp.json()["done"] == ["add"]
+
+
+def test_site_registry_rejects_unknown():
+    import pytest
+
+    from app.config import SiteConfig
+    from app.sites import available, create_site
+    from app.sites.base import SiteError
+
+    assert "mteam" in available()
+    with pytest.raises(SiteError):
+        create_site(SiteConfig(name="nothere", base_url="https://x", user_agent="ua",
+                               api_key="k"))
