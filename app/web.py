@@ -1,6 +1,10 @@
-"""Web 面板：一页展示各服务状态。"""
+"""Web 面板：状态由服务端直接渲染进 HTML，前端只负责后续刷新。
+
+这样即使浏览器的 fetch 被卡住或被拦截，页面打开时也能看到数据。
+"""
 from __future__ import annotations
 
+import json
 import time
 from typing import List
 
@@ -46,9 +50,69 @@ PAGE = """<!doctype html>
 </head>
 <body>
 <h1>pt-seedflow</h1>
-<div class="sub" id="meta">加载中…</div>
+<div class="sub" id="meta">__INITIAL_META__</div>
 <div class="grid" id="grid"></div>
 <script>
+const INITIAL = __INITIAL__;
+let fails = 0;
+
+function esc(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function fmt(sec){ if(sec<=0) return "即将"; var m=Math.floor(sec/60); return m+" 分钟后"; }
+
+function render(d, note){
+  document.getElementById('meta').textContent = note ||
+    ('运行 ' + d.uptime_human + ' · 共 ' + d.services.length + ' 个服务 · ' + new Date().toLocaleTimeString());
+  document.getElementById('grid').innerHTML = d.services.map(s => {
+    const pct = Math.min(100, s.used_gb / s.disk_gb * 100).toFixed(1);
+    const dlPct = Math.min(100, s.quota.dl_used / s.quota.dl_cap * 100).toFixed(0);
+    const acts = s.actions.slice(0, 6).map(a =>
+      '<div class="act ' + a.kind + '"><span class="k">' + a.kind + '</span><span>'
+      + esc(a.name).slice(0, 46) + ' <span style="color:#6b7280">' + esc(a.detail) + '</span></span></div>'
+    ).join('') || '<div class="act"><span class="k">-</span><span>暂无动作</span></div>';
+    return '<div class="card">'
+      + '<h2>' + esc(s.name)
+      + '<span class="tag ' + (s.dry_run ? 'dry' : 'live') + '">' + (s.dry_run ? '演练' : '运行') + '</span></h2>'
+      + '<div class="row"><span>磁盘</span><b>' + s.used_gb + ' / ' + s.disk_gb + ' GB</b></div>'
+      + '<div class="bar"><i style="width:' + pct + '%"></i></div>'
+      + '<div class="row"><span>任务</span><b>' + s.torrents + ' / ' + s.max_torrents + '</b></div>'
+      + '<div class="row"><span>候选池</span><b>' + s.candidates + '</b></div>'
+      + '<div class="row"><span>下载配额</span><b>' + s.quota.dl_used + ' / ' + s.quota.dl_cap + '</b></div>'
+      + '<div class="bar"><i style="width:' + dlPct + '%;background:#8b5cf6"></i></div>'
+      + '<div class="row"><span>下次 search</span><b>' + fmt(s.next_search_seconds) + '</b></div>'
+      + '<div class="row"><span>累计 加/删</span><b>' + s.added_total + ' / ' + s.deleted_total + '</b></div>'
+      + (s.last_error ? '<div class="err">' + esc(s.last_error) + '</div>' : '')
+      + '<div class="acts">' + acts + '</div>'
+      + '<div class="acts"><button data-act="add" data-svc="' + esc(s.name) + '">手动加种</button>'
+      + '<button data-act="delete" data-svc="' + esc(s.name) + '">手动删种</button></div>'
+      + '</div>';
+  }).join('');
+}
+
+async function fetchT(url, opts){
+  opts = opts || {};
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    return await fetch(url, Object.assign({cache:'no-store', signal: ctrl.signal}, opts));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function refresh(){
+  try {
+    const r = await fetchT('api/status');
+    const d = await r.json();
+    render(d);
+    fails = 0;
+  } catch (e) {
+    fails++;
+    const why = (e && e.name === 'AbortError') ? '请求超时' : e;
+    render(INITIAL, '实时刷新失败（' + why + '），显示的是打开页面时的数据 · 第 ' + fails + ' 次');
+    if (fails >= 3) { setTimeout(() => location.reload(), 1500); }
+  }
+}
+
 async function fire(name, action){
   if(!confirm('确认对 ' + name + ' 执行手动' + (action==='add'?'加种':'删种') + '？')) return;
   let r;
@@ -65,61 +129,15 @@ async function fire(name, action){
   if(d.error) alert(d.error);
   refresh();
 }
-function fmt(sec){ if(sec<=0) return "即将"; var m=Math.floor(sec/60); return m+" 分钟后"; }
-function esc(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-async function fetchT(url, opts){
-  // 5 秒超时：容器重启时旧请求会被切断，没有超时就会永远停在"加载中"
-  opts = opts || {};
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 5000);
-  try {
-    return await fetch(url, Object.assign({cache:'no-store', signal: ctrl.signal}, opts));
-  } finally {
-    clearTimeout(timer);
-  }
-}
-let fails = 0;
-async function refresh(){
-  try {
-    const r = await fetchT('api/status');
-    const d = await r.json();
-    document.getElementById('meta').textContent =
-      '运行 ' + d.uptime_human + ' · 共 ' + d.services.length + ' 个服务 · ' + new Date().toLocaleTimeString();
-    document.getElementById('grid').innerHTML = d.services.map(s => {
-      const pct = Math.min(100, s.used_gb / s.disk_gb * 100).toFixed(1);
-      const dlPct = Math.min(100, s.quota.dl_used / s.quota.dl_cap * 100).toFixed(0);
-      const acts = s.actions.slice(0, 6).map(a =>
-        '<div class="act ' + a.kind + '"><span class="k">' + a.kind + '</span><span>'
-        + esc(a.name).slice(0, 46) + ' <span style="color:#6b7280">' + esc(a.detail) + '</span></span></div>'
-      ).join('') || '<div class="act"><span class="k">-</span><span>暂无动作</span></div>';
-      return '<div class="card">'
-        + '<h2>' + esc(s.name)
-        + '<span class="tag ' + (s.dry_run ? 'dry' : 'live') + '">' + (s.dry_run ? '演练' : '运行') + '</span></h2>'
-        + '<div class="row"><span>磁盘</span><b>' + s.used_gb + ' / ' + s.disk_gb + ' GB</b></div>'
-        + '<div class="bar"><i style="width:' + pct + '%"></i></div>'
-        + '<div class="row"><span>任务</span><b>' + s.torrents + ' / ' + s.max_torrents + '</b></div>'
-        + '<div class="row"><span>候选池</span><b>' + s.candidates + '</b></div>'
-        + '<div class="row"><span>下载配额</span><b>' + s.quota.dl_used + ' / ' + s.quota.dl_cap + '</b></div>'
-        + '<div class="bar"><i style="width:' + dlPct + '%;background:#8b5cf6"></i></div>'
-        + '<div class="row"><span>下次 search</span><b>' + fmt(s.next_search_seconds) + '</b></div>'
-        + '<div class="row"><span>累计 加/删</span><b>' + s.added_total + ' / ' + s.deleted_total + '</b></div>'
-        + (s.last_error ? '<div class="err">' + esc(s.last_error) + '</div>' : '')
-        + '<div class="acts">' + acts + '</div>'
-        + '<div class="acts"><button onclick="fire(\'' + esc(s.name) + '\',\'add\')">手动加种</button>'
-        + '<button onclick="fire(\'' + esc(s.name) + '\',\'delete\')">手动删种</button></div>'
-        + '</div>';
-    }).join('');
-    fails = 0;
-  } catch (e) {
-    fails++;
-    document.getElementById('meta').textContent =
-      '无法获取状态（' + (e && e.name === 'AbortError' ? '请求超时' : e) + '），第 ' +
-      fails + ' 次，' + (fails >= 3 ? '正在自动刷新…' : '稍后自动重试…');
-    // 连续 3 次失败就整页重载，避免永久卡死
-    if (fails >= 3) { setTimeout(() => location.reload(), 1500); }
-  }
-}
-refresh();
+
+document.addEventListener('click', function(e){
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  fire(btn.getAttribute('data-svc'), btn.getAttribute('data-act'));
+});
+
+// 打开页面立即渲染服务端给的数据，不等任何请求
+render(INITIAL);
 setInterval(refresh, 10000);
 </script>
 </body>
@@ -127,13 +145,32 @@ setInterval(refresh, 10000);
 """
 
 
+def build_status(runners: List[ServiceRunner], started_at: float) -> dict:
+    uptime = int(time.time() - started_at)
+    hours, rest = divmod(uptime, 3600)
+    minutes, seconds = divmod(rest, 60)
+    return {
+        "uptime_seconds": uptime,
+        "uptime_human": "%d 小时 %d 分" % (hours, minutes) if hours else "%d 分 %d 秒" % (minutes, seconds),
+        "services": [r.snapshot() for r in runners],
+    }
+
+
 def create_app(runners: List[ServiceRunner], started_at: float) -> FastAPI:
     app = FastAPI(title="pt-seedflow", docs_url=None, redoc_url=None)
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
+        data = build_status(runners, started_at)
+        # 内联 JSON 时要转义 "</"，避免提前闭合 script 标签
+        payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+        html = PAGE.replace("__INITIAL__", payload).replace(
+            "__INITIAL_META__",
+            "运行 %s · 共 %d 个服务 · 数据为打开本页时快照" % (
+                data["uptime_human"], len(data["services"])),
+        )
         # 禁止缓存：否则部署新前端后，浏览器可能仍用旧 JS
-        return HTMLResponse(PAGE, headers={
+        return HTMLResponse(html, headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
         })
@@ -152,13 +189,6 @@ def create_app(runners: List[ServiceRunner], started_at: float) -> FastAPI:
 
     @app.get("/api/status")
     def status() -> JSONResponse:
-        uptime = int(time.time() - started_at)
-        hours, rest = divmod(uptime, 3600)
-        minutes, seconds = divmod(rest, 60)
-        return JSONResponse({
-            "uptime_seconds": uptime,
-            "uptime_human": "%d 小时 %d 分" % (hours, minutes) if hours else "%d 分 %d 秒" % (minutes, seconds),
-            "services": [r.snapshot() for r in runners],
-        })
+        return JSONResponse(build_status(runners, started_at))
 
     return app
