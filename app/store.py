@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS torrent_meta (
     PRIMARY KEY (service, hash)
 );
 
+CREATE TABLE IF NOT EXISTS candidate_cache (
+    service TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    saved_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS service_state (
     service TEXT NOT NULL,
     key     TEXT NOT NULL,
@@ -315,6 +321,26 @@ class Store:
         return {row[0]: {"tid": row[1], "discount": row[2],
                          "discount_end": row[3], "added_at": row[4],
                          "published_at": row[5]} for row in rows}
+
+    # ---------- 候选池缓存（重启后恢复） ----------
+    def save_candidates(self, service: str, payload: str, saved_at: Optional[int] = None) -> None:
+        stamp = int(saved_at if saved_at is not None else time.time())
+        with self._cursor() as cur:
+            cur.execute(
+                "INSERT INTO candidate_cache(service, payload, saved_at) VALUES (?,?,?)"
+                " ON CONFLICT(service) DO UPDATE SET payload=excluded.payload,"
+                " saved_at=excluded.saved_at",
+                (service, payload, stamp),
+            )
+
+    def load_candidates(self, service: str) -> tuple:
+        with self._cursor() as cur:
+            cur.execute("SELECT payload, saved_at FROM candidate_cache WHERE service=?",
+                        (service,))
+            row = cur.fetchone()
+        if not row:
+            return None, 0
+        return row[0], int(row[1] or 0)
 
     # ---------- 服务级键值（如上次 search 时间） ----------
     def kv_set(self, service: str, key: str, value: int) -> None:

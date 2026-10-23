@@ -56,6 +56,13 @@ def create_app(runners: List[ServiceRunner], started_at: float) -> FastAPI:
     def services_json() -> JSONResponse:
         return JSONResponse({"services": [r.snapshot() for r in runners]})
 
+    @app.post("/api/services/{name}/search")
+    def service_search(name: str) -> JSONResponse:
+        runner = next((r for r in runners if r.cfg.name == name), None)
+        if runner is None:
+            return JSONResponse({"error": "未知服务: %s" % name}, status_code=404)
+        return JSONResponse(runner.manual_search())
+
     @app.get("/api/services/{name}/torrents")
     def service_torrents(name: str) -> JSONResponse:
         runner = next((r for r in runners if r.cfg.name == name), None)

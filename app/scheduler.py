@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import threading
 import time
 from collections import deque
@@ -11,7 +12,7 @@ from typing import Deque, Dict, List, Optional
 from .config import AppConfig, ServiceConfig
 from .lifecycle import AddPlan, Pick, decide_delete, plan_adds, verify_deletable
 from .qb import QBError, QBittorrent
-from .scoring import Candidate
+from .scoring import SEARCH_PAGE_SIZE, Candidate
 from .store import Store
 
 
@@ -63,11 +64,28 @@ class ServiceRunner:
     ul_since_start: int = 0
     # 最近一次 qB 任务快照，供详情页使用（避免 Web 端反查 qB）
     torrents_cache: List[object] = field(default_factory=list)
+    _cache_restored: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     # ---------- 工具 ----------
     def _log(self, kind: str, name: str, detail: str = "") -> None:
         self.actions.appendleft(Action(int(time.time()), kind, name, detail))
+
+    def _restore_candidates(self) -> None:
+        """容器重启后恢复上次的候选池，避免界面空白一小时。"""
+        if self._cache_restored:
+            return
+        self._cache_restored = True
+        payload, saved_at = self.store.load_candidates(self.cfg.name)
+        if not payload:
+            return
+        try:
+            restored = [Candidate.from_dict(item) for item in json.loads(payload)]
+        except Exception:  # noqa: BLE001  缓存损坏就重新 search
+            return
+        if restored:
+            self.candidates = restored
+            self.last_search_at = float(saved_at)
 
     def _need_refresh(self) -> bool:
         return self.ticks_since_search >= self.refresh_every_ticks
@@ -97,6 +115,7 @@ class ServiceRunner:
             self.last_tick_at = time.time()
             self.ticks_since_search += 1
             self.last_error = ""
+            self._restore_candidates()
             try:
                 torrents = self.qb.list_torrents(category=self.cfg.category)
                 self.used_bytes = sum(t.size for t in torrents)
@@ -117,6 +136,24 @@ class ServiceRunner:
             except Exception as exc:  # noqa: BLE001  单 tick 失败不应终止服务
                 self.last_error = "%s: %s" % (type(exc).__name__, exc)
                 self._log("error", "-", self.last_error)
+
+    def manual_search(self) -> dict:
+        """手动刷新候选池：跳过最小间隔，但仍受每日配额限制。"""
+        with self._lock:
+            self.last_error = ""
+            self._restore_candidates()
+            try:
+                ok = self._step_search(force=True)
+            except Exception as exc:  # noqa: BLE001
+                self.last_error = "%s: %s" % (type(exc).__name__, exc)
+                self._log("error", "search", self.last_error)
+                ok = False
+            return {
+                "service": self.cfg.name,
+                "ok": ok,
+                "candidates": len(self.candidates),
+                "snapshot": self.snapshot(),
+            }
 
     def manual(self, action: str = "both") -> dict:
         """手动触发一次加/删，不触发 search。
@@ -260,35 +297,43 @@ class ServiceRunner:
                 self._log("error", "-", "删除失败，共 %d 个" % len(hashes))
 
     # ---------- 搜索 ----------
-    def _step_search(self) -> None:
+    def _step_search(self, force: bool = False) -> bool:
+        """刷新候选池。force=True 由手动触发，跳过最小间隔但仍受每日配额限制。"""
         # 强制最小间隔：即使重启或 tick 计数被重置，也不会多刷
         last_ts = self.store.kv_get(self.cfg.name, "last_search_ts", 0)
         elapsed = time.time() - last_ts
-        if last_ts and elapsed < self.cfg.search_interval_seconds:
+        if not force and last_ts and elapsed < self.cfg.search_interval_seconds:
             self._log("idle", "跳过 search",
                       "距上次仅 %d 秒（下限 %d 秒）" % (elapsed, self.cfg.search_interval_seconds))
             self.ticks_since_search = 0
-            return
+            return False
 
         cap = self.cfg.limits.search_cap
         used = self.store.quota_used(self.cfg.name, "search", today())
         if used >= cap:
             self._log("quota", "search", "每日额度已用尽 %d/%d" % (used, cap))
-            return
+            return False
 
         try:
-            candidates = self.site.search(page=1, page_size=100)
+            candidates = self.site.search(page=1, page_size=SEARCH_PAGE_SIZE)
         except Exception as exc:  # noqa: BLE001
             self._log("error", "search", str(exc))
             self.last_error = str(exc)
-            return
+            return False
 
         self.store.quota_add(self.cfg.name, "search", today())
         self.store.kv_set(self.cfg.name, "last_search_ts", int(time.time()))
         self.candidates = candidates
         self.last_search_at = time.time()
         self.ticks_since_search = 0
-        self._log("search", "候选池", "%d 个候选" % len(candidates))
+        self.store.save_candidates(
+            self.cfg.name,
+            json.dumps([c.as_dict() for c in candidates], ensure_ascii=False),
+            int(self.last_search_at),
+        )
+        self._log("search", "候选池", "%d 个候选%s" % (
+            len(candidates), "（手动）" if force else ""))
+        return True
 
     # ---------- 加种 ----------
     def _step_add(self, torrents, max_adds: Optional[int] = None) -> None:

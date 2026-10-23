@@ -49,3 +49,49 @@ def test_business_error_is_not_retried():
     with pytest.raises(SiteError):
         make_runner(site)._genlink("42")
     assert site.calls == 1
+
+
+class FakeStore:
+    def __init__(self):
+        self.saved = {}
+        self.kv = {}
+
+    def load_candidates(self, service):
+        return self.saved.get(service, (None, 0))
+
+    def save_candidates(self, service, payload, saved_at=None):
+        self.saved[service] = (payload, saved_at or 0)
+
+
+def test_restore_candidates_from_cache():
+    import json
+    from app.scoring import Candidate
+
+    store = FakeStore()
+    store.save_candidates("svc", json.dumps([{
+        "tid": "1", "name": "缓存的种子", "size": 1024, "discount": "FREE",
+        "discount_end": None, "seeders": 1, "leechers": 2, "created": 100, "category": 402,
+    }]), 123)
+
+    runner = object.__new__(ServiceRunner)
+    runner.store = store
+    runner.cfg = type("Cfg", (), {"name": "svc"})()
+    runner.candidates = []
+    runner._cache_restored = False
+    runner.last_search_at = 0
+
+    runner._restore_candidates()
+    assert len(runner.candidates) == 1
+    assert runner.candidates[0].name == "缓存的种子"
+    assert runner.last_search_at == 123
+
+
+def test_restore_is_noop_when_cache_empty():
+    runner = object.__new__(ServiceRunner)
+    runner.store = FakeStore()
+    runner.cfg = type("Cfg", (), {"name": "svc"})()
+    runner.candidates = []
+    runner._cache_restored = False
+    runner.last_search_at = 0
+    runner._restore_candidates()
+    assert runner.candidates == []

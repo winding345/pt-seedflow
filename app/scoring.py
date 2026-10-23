@@ -14,6 +14,9 @@ W_RECENCY = 0.50
 W_RATIO = 0.35
 W_HEAT = 0.15
 
+# 每轮 search 取多少条候选（m-team 单页上限 200）
+SEARCH_PAGE_SIZE = 100
+
 # 新鲜度半衰期：6 小时后权重降到一半
 RECENCY_HALF_LIFE_HOURS = 6.0
 
@@ -32,6 +35,20 @@ class Candidate:
     created: Optional[int] = None
     category: Optional[int] = None
     page_url: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Candidate":
+        return cls(
+            tid=str(data.get("tid")),
+            name=str(data.get("name") or ""),
+            size=int(data.get("size") or 0),
+            discount=str(data.get("discount") or "NORMAL"),
+            discount_end=data.get("discount_end"),
+            seeders=int(data.get("seeders") or 0),
+            leechers=int(data.get("leechers") or 0),
+            created=data.get("created"),
+            category=data.get("category"),
+        )
 
     def as_dict(self) -> dict:
         return {

@@ -118,6 +118,7 @@ function cardHtml(s) {
     + (s.last_error ? '<div class="error-box" style="margin-top:12px">' + esc(s.last_error) + '</div>' : '')
     + '<div class="card-foot">'
     + '<button data-detail="' + esc(s.name) + '">查看任务</button>'
+    + '<button class="ghost" data-search="' + esc(s.name) + '">手动 search</button>'
     + '<button class="ghost" data-act="add" data-svc="' + esc(s.name) + '">手动加种</button>'
     + '<button class="ghost" data-act="delete" data-svc="' + esc(s.name) + '">手动删种</button>'
     + '</div></div>';
@@ -244,6 +245,19 @@ async function load() {
   }
 }
 
+async function search(name) {
+  if (!confirm('立即刷新候选池？会消耗一次 search 配额。')) return;
+  try {
+    const resp = await fetchT('api/services/' + encodeURIComponent(name) + '/search', {method: 'POST'});
+    const d = await resp.json();
+    if (d.error) alert(d.error);
+    else if (!d.ok) alert('本轮未刷新，详情见卡片日志');
+  } catch (err) {
+    alert('请求失败：' + err);
+  }
+  load();
+}
+
 async function fire(name, action) {
   if (!confirm('确认对 ' + name + ' 执行手动' + (action === 'add' ? '加种' : '删种') + '？')) return;
   try {
@@ -272,6 +286,12 @@ document.addEventListener('click', function (e) {
   const detailBtn = e.target.closest('[data-detail]');
   if (detailBtn) {
     location.hash = '#/service/' + encodeURIComponent(detailBtn.getAttribute('data-detail'));
+    return;
+  }
+  const searchBtn = e.target.closest('button[data-search]');
+  if (searchBtn) {
+    e.stopPropagation();
+    search(searchBtn.getAttribute('data-search'));
     return;
   }
   const actBtn = e.target.closest('button[data-act]');
