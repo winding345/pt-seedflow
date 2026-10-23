@@ -169,6 +169,27 @@ class ServiceRunner:
                 return torrent.hash
         return None
 
+    def _genlink(self, tid: str, retries: int = 2) -> Optional[str]:
+        """换下载链接；连接类错误短暂重试，业务错误直接返回。
+
+        m-team 偶尔会 reset 连接（Errno 104），重试通常立刻就好。
+        """
+        last_error: Optional[Exception] = None
+        for attempt in range(retries + 1):
+            try:
+                return self.site.genlink(tid)
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                text = str(exc)
+                transient = any(k in text for k in (
+                    "连接失败", "Connection reset", "timed out", "超时", "Errno 104"))
+                if not transient or attempt >= retries:
+                    raise
+                time.sleep(1.5 * (attempt + 1))
+        if last_error:
+            raise last_error
+        return None
+
     # ---------- 删除 ----------
     def _step_delete(self, torrents) -> None:
         now = time.time()
@@ -311,7 +332,7 @@ class ServiceRunner:
                 self.torrent_count += 1
                 continue
 
-            url = self.site.genlink(pick.candidate.tid)
+            url = self._genlink(pick.candidate.tid)
             self.store.quota_add(self.cfg.name, "dl", today())
             if not url:
                 self._log("error", pick.candidate.name, "换取下载链接失败")
