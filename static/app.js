@@ -143,6 +143,7 @@ function renderList(data) {
 let chartDays = 1;
 let chartBucket = 'hour';
 let chartData = null;
+let chartBars = [];
 
 function chartHtml() {
   const rangeBtn = d =>
@@ -213,6 +214,7 @@ function drawChart() {
 
   const slot = plotW / points.length;
   const barW = Math.max(2, Math.min(18, slot / 2.6));
+  chartBars = [];
   const d = new Date();
 
   points.forEach((point, index) => {
@@ -224,6 +226,15 @@ function drawChart() {
     ctx.fillStyle = '#27ae60';
     ctx.fillRect(cx + 1, padTop + plotH - hUl, barW, hUl);
 
+    // 悬浮命中的是"整列"，柱子太矮也能看到数值
+    chartBars.push({
+      x: cx - barW - 2,
+      w: barW * 2 + 4,
+      top: padTop,
+      bottom: padTop + plotH,
+      point: point,
+    });
+
     const every = Math.ceil(points.length / 8);
     if (index % every === 0) {
       d.setTime(point.ts * 1000);
@@ -234,6 +245,50 @@ function drawChart() {
       ctx.textAlign = 'center';
       ctx.fillText(label, cx, cssHeight - 12);
     }
+  });
+
+  bindChartHover(canvas);
+}
+
+function bindChartHover(canvas) {
+  if (canvas.dataset.hoverReady === '1') return;
+  canvas.dataset.hoverReady = '1';
+
+  const tip = document.createElement('div');
+  tip.className = 'chart-tip';
+  canvas.parentElement.appendChild(tip);
+
+  canvas.addEventListener('mousemove', function (event) {
+    const x = event.offsetX;
+    const hit = chartBars.find(function (bar) {
+      return x >= bar.x && x <= bar.x + bar.w;
+    });
+    if (!hit) {
+      tip.style.display = 'none';
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const moment = new Date(hit.point.ts * 1000);
+    const label = chartBucket === 'day'
+      ? (moment.getMonth() + 1) + '-' + moment.getDate()
+      : String(moment.getHours()).padStart(2, '0') + ':00';
+    tip.innerHTML = '<div class="t-time">' + label + '</div>'
+      + '<div><span class="dot dl"></span>下载 ' + bytes(hit.point.downloaded) + '</div>'
+      + '<div><span class="dot ul"></span>上传 ' + bytes(hit.point.uploaded) + '</div>';
+    tip.style.display = 'block';
+    canvas.style.cursor = 'pointer';
+
+    // 靠近右边界时提示框向左翻转，避免被裁掉
+    const boxWidth = canvas.parentElement.clientWidth;
+    const tipWidth = 150;
+    const left = canvas.offsetLeft + x + 14;
+    tip.style.left = (left + tipWidth > boxWidth ? left - tipWidth - 28 : left) + 'px';
+    tip.style.top = (canvas.offsetTop + 10) + 'px';
+  });
+
+  canvas.addEventListener('mouseleave', function () {
+    tip.style.display = 'none';
+    canvas.style.cursor = 'default';
   });
 }
 
