@@ -121,3 +121,35 @@ def test_counter_persists_across_reopen(tmp_path):
     assert second.counter_get("s1", "removed") == 1
     assert second.counter_get("s1", "missing") == 0
     second.close()
+
+
+def test_traffic_accumulates_and_sums(tmp_path):
+    store = make_store(tmp_path)
+    store.add_traffic("s1", 1792650000, 100, 10)
+    store.add_traffic("s1", 1792650000, 50, 5)      # 同一小时累加
+    store.add_traffic("s1", 1792653600, 200, 20)
+    assert store.traffic_total("s1") == (350, 35)
+
+    rows = store.traffic_rows("s1", 0)
+    assert rows == [(1792650000, 150, 15), (1792653600, 200, 20)]
+    # 其他服务隔离
+    assert store.traffic_total("s2") == (0, 0)
+
+
+def test_prune_traffic(tmp_path):
+    store = make_store(tmp_path)
+    store.add_traffic("s1", 1000, 1, 1)
+    store.add_traffic("s1", 5000, 2, 2)
+    store.prune_traffic(3000)
+    assert store.traffic_rows("s1", 0) == [(5000, 2, 2)]
+
+
+def test_traffic_total_survives_reopen(tmp_path):
+    path = tmp_path / "state.db"
+    first = Store(path)
+    first.add_traffic("s1", 1000, 10, 1)
+    first.close()
+
+    second = Store(path)
+    assert second.traffic_total("s1") == (10, 1)
+    second.close()

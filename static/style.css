@@ -156,3 +156,17 @@ td.name { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-spa
   padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px;
 }
 .error-box button { margin-left: 10px; padding: 3px 10px; font-size: 12px; }
+
+/* ---------- 流量图 ---------- */
+.chart-box {
+  background: #fff; border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; margin-bottom: 20px;
+  box-shadow: 0 4px 12px rgba(52, 73, 94, 0.06);
+}
+.chart-head { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; flex-wrap: wrap; }
+.chart-title { font-size: 13px; font-weight: 600; color: #34495e; margin-right: auto; }
+.chart-box canvas { display: block; width: 100%; }
+.legend { display: flex; align-items: center; gap: 16px; font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+.legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.legend .dot.dl { background: #3498db; }
+.legend .dot.ul { background: #27ae60; }

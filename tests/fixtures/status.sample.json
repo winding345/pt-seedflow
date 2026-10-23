@@ -39,8 +39,6 @@
     "candidates": 100,
     "current_downloaded": 52265762816,
     "current_uploaded": 1824522240,
-    "since_start_downloaded": 52265762816,
-    "since_start_uploaded": 1824522240,
     "added_total": 9,
     "removed_total": 0,
     "search_used": 8,
@@ -48,7 +46,9 @@
     "dl_used": 22,
     "dl_cap": 90,
     "next_search_seconds": 3300,
-    "quota_exhausted": false
+    "quota_exhausted": false,
+    "since_launch_downloaded": 212111308769,
+    "since_launch_uploaded": 71933731324
    },
    "actions": [
     {

@@ -69,6 +69,16 @@ CREATE TABLE IF NOT EXISTS torrent_meta (
     PRIMARY KEY (service, hash)
 );
 
+CREATE TABLE IF NOT EXISTS traffic (
+    service    TEXT NOT NULL,
+    ts         INTEGER NOT NULL,
+    downloaded INTEGER NOT NULL DEFAULT 0,
+    uploaded   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (service, ts)
+);
+
+CREATE INDEX IF NOT EXISTS idx_traffic_time ON traffic(service, ts);
+
 CREATE TABLE IF NOT EXISTS candidate_cache (
     service TEXT PRIMARY KEY,
     payload TEXT NOT NULL,
@@ -321,6 +331,39 @@ class Store:
         return {row[0]: {"tid": row[1], "discount": row[2],
                          "discount_end": row[3], "added_at": row[4],
                          "published_at": row[5]} for row in rows}
+
+    # ---------- 流量明细（按小时桶） ----------
+    def add_traffic(self, service: str, ts: int, downloaded: int = 0, uploaded: int = 0) -> None:
+        if downloaded <= 0 and uploaded <= 0:
+            return
+        with self._cursor() as cur:
+            cur.execute(
+                "INSERT INTO traffic(service, ts, downloaded, uploaded) VALUES (?,?,?,?)"
+                " ON CONFLICT(service, ts) DO UPDATE SET"
+                " downloaded = downloaded + excluded.downloaded,"
+                " uploaded = uploaded + excluded.uploaded",
+                (service, int(ts), int(downloaded), int(uploaded)),
+            )
+
+    def traffic_total(self, service: str) -> tuple:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(SUM(downloaded),0), COALESCE(SUM(uploaded),0)"
+                " FROM traffic WHERE service=?", (service,))
+            row = cur.fetchone()
+        return int(row[0]), int(row[1])
+
+    def traffic_rows(self, service: str, since_ts: int) -> List[Tuple[int, int, int]]:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT ts, downloaded, uploaded FROM traffic"
+                " WHERE service=? AND ts >= ? ORDER BY ts ASC",
+                (service, int(since_ts)))
+            return [(int(r[0]), int(r[1]), int(r[2])) for r in cur.fetchall()]
+
+    def prune_traffic(self, before_ts: int) -> None:
+        with self._cursor() as cur:
+            cur.execute("DELETE FROM traffic WHERE ts < ?", (int(before_ts),))
 
     # ---------- 候选池缓存（重启后恢复） ----------
     def save_candidates(self, service: str, payload: str, saved_at: Optional[int] = None) -> None:

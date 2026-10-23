@@ -59,9 +59,8 @@ class ServiceRunner:
     _progress: Dict[str, float] = field(default_factory=dict)
     # 每个任务的累计值快照，用于计算增量
     _prev: Dict[str, tuple] = field(default_factory=dict)
-    # 服务启动以来的累计下载/上传字节数
-    dl_since_start: int = 0
-    ul_since_start: int = 0
+    # 本 tick 内累计的流量，结束时统一写入小时桶
+    _pending_traffic: Dict[int, tuple] = field(default_factory=dict)
     # 最近一次 qB 任务快照，供详情页使用（避免 Web 端反查 qB）
     torrents_cache: List[object] = field(default_factory=list)
     _cache_restored: bool = False
@@ -91,8 +90,10 @@ class ServiceRunner:
         return self.ticks_since_search >= self.refresh_every_ticks
 
     def _account(self, torrents) -> None:
-        """把每个任务的增量累加到"服务启动以来"的统计里。"""
+        """把每个任务的增量记到当前小时桶（含已删除任务，删除前会补最后一次）。"""
         alive = set()
+        hour = int(time.time() // 3600 * 3600)
+        dl_sum = up_sum = 0
         for torrent in torrents:
             alive.add(torrent.hash)
             prev = self._prev.get(torrent.hash)
@@ -100,10 +101,12 @@ class ServiceRunner:
                 up_delta = torrent.uploaded - prev[0]
                 dl_delta = torrent.downloaded - prev[1]
                 if up_delta > 0:
-                    self.ul_since_start += up_delta
+                    up_sum += up_delta
                 if dl_delta > 0:
-                    self.dl_since_start += dl_delta
+                    dl_sum += dl_delta
             self._prev[torrent.hash] = (torrent.uploaded, torrent.downloaded)
+        self.store.add_traffic(self.cfg.name, hour, dl_sum, up_sum)
+
         # 已不存在的任务不再保留快照
         for dead in [h for h in self._prev if h not in alive]:
             self._prev.pop(dead, None)
@@ -272,9 +275,16 @@ class ServiceRunner:
             if self.qb.delete(hashes, delete_files=True):
                 self.deleted_total += len(hashes)
                 now_ts = int(time.time())
+                hour_ts = int(time.time() // 3600 * 3600)
                 for item_hash, item_name in verified:
                     snap = by_hash.get(item_hash)
                     info_x = meta.get(item_hash) or {}
+                    prev = self._prev.get(item_hash)
+                    if snap and prev:
+                        self.store.add_traffic(
+                            self.cfg.name, hour_ts,
+                            max(0, snap.downloaded - prev[1]),
+                            max(0, snap.uploaded - prev[0]))
                     self.store.archive_torrent(
                         service=self.cfg.name,
                         hash_=item_hash,
@@ -438,6 +448,7 @@ class ServiceRunner:
 
         current_dl = sum(getattr(t, "downloaded", 0) for t in self.torrents_cache)
         current_ul = sum(getattr(t, "uploaded", 0) for t in self.torrents_cache)
+        total_dl, total_ul = self.store.traffic_total(cfg.name)
 
         return {
             "name": cfg.name,
@@ -470,8 +481,8 @@ class ServiceRunner:
                 "candidates": len(self.candidates),
                 "current_downloaded": current_dl,
                 "current_uploaded": current_ul,
-                "since_start_downloaded": self.dl_since_start,
-                "since_start_uploaded": self.ul_since_start,
+                "since_launch_downloaded": total_dl,
+                "since_launch_uploaded": total_ul,
                 "added_total": self.store.counter_get(cfg.name, "added"),
                 "removed_total": self.store.counter_get(cfg.name, "removed"),
                 "search_used": search_used,

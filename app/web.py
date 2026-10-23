@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -69,6 +70,34 @@ def create_app(runners: List[ServiceRunner], started_at: float) -> FastAPI:
         if runner is None:
             return JSONResponse({"error": "未知服务: %s" % name}, status_code=404)
         return JSONResponse(runner.torrent_rows())
+
+    @app.get("/api/services/{name}/traffic")
+    def service_traffic(name: str, days: int = 1, bucket: str = "hour") -> JSONResponse:
+        runner = next((r for r in runners if r.cfg.name == name), None)
+        if runner is None:
+            return JSONResponse({"error": "未知服务: %s" % name}, status_code=404)
+        if bucket not in ("hour", "day"):
+            return JSONResponse({"error": "bucket 只能是 hour 或 day"}, status_code=400)
+
+        days = max(1, min(30, int(days)))
+        since = int(time.time() - days * 86400)
+        rows = runner.store.traffic_rows(name, since)
+
+        buckets = {}
+        for ts, downloaded, uploaded in rows:
+            moment = datetime.fromtimestamp(ts)
+            if bucket == "day":
+                moment = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+            else:
+                moment = moment.replace(minute=0, second=0, microsecond=0)
+            key = int(moment.timestamp())
+            item = buckets.setdefault(key, [0, 0])
+            item[0] += downloaded
+            item[1] += uploaded
+
+        points = [{"ts": ts, "downloaded": buckets[ts][0], "uploaded": buckets[ts][1]}
+                  for ts in sorted(buckets)]
+        return JSONResponse({"bucket": bucket, "days": days, "points": points})
 
     # ---------- 静态资源 ----------
     @app.get("/", response_class=HTMLResponse)

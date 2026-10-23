@@ -105,8 +105,8 @@ function cardHtml(s) {
     + '<div class="stats">'
     + '<div class="stat"><div class="v">' + bytes(st.current_downloaded) + '</div><div class="k">当前已下载</div></div>'
     + '<div class="stat"><div class="v">' + bytes(st.current_uploaded) + '</div><div class="k">当前已上传</div></div>'
-    + '<div class="stat"><div class="v">' + bytes(st.since_start_downloaded) + '</div><div class="k">启动以来下载</div></div>'
-    + '<div class="stat"><div class="v">' + bytes(st.since_start_uploaded) + '</div><div class="k">启动以来上传</div></div>'
+    + '<div class="stat"><div class="v">' + bytes(st.since_launch_downloaded) + '</div><div class="k">上线以来下载</div></div>'
+    + '<div class="stat"><div class="v">' + bytes(st.since_launch_uploaded) + '</div><div class="k">上线以来上传</div></div>'
     + '<div class="stat"><div class="v">' + st.added_total + ' / ' + st.removed_total + '</div><div class="k">累计新增 / 移除</div></div>'
     + '<div class="stat"><div class="v">' + (st.quota_exhausted ? '已耗尽' : '正常') + '</div><div class="k">配额状态</div></div>'
     + '</div>'
@@ -138,6 +138,114 @@ function renderList(data) {
 }
 
 // ---------- 详情页 ----------
+let chartDays = 1;
+let chartBucket = 'hour';
+let chartData = null;
+
+function chartHtml() {
+  const rangeBtn = d =>
+    '<button data-days="' + d + '" class="' + (chartDays === d ? 'active' : '') + '">' + d + ' 天</button>';
+  const bucketBtn = (b, label, disabled) =>
+    '<button data-bucket="' + b + '" class="' + (chartBucket === b ? 'active' : '') + '"'
+    + (disabled ? ' disabled' : '') + '>' + label + '</button>';
+  return '<div class="chart-box">'
+    + '<div class="chart-head"><span class="chart-title">流量趋势</span>'
+    + '<div class="filters">' + [1, 3, 7, 30].map(rangeBtn).join('') + '</div>'
+    + '<div class="filters">' + bucketBtn('hour', '按小时', chartDays > 3)
+    + bucketBtn('day', '按天', false) + '</div></div>'
+    + '<canvas id="traffic" height="240"></canvas>'
+    + '<div class="legend"><span class="dot dl"></span>下载 <span class="dot ul"></span>上传</div>'
+    + '</div>';
+}
+
+function niceMax(value) {
+  if (value <= 0) return 1;
+  const exp = Math.pow(10, Math.floor(Math.log10(value)));
+  const norm = value / exp;
+  const step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+  return step * exp;
+}
+
+function drawChart() {
+  const canvas = document.getElementById('traffic');
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.parentElement.clientWidth - 32;
+  const cssHeight = 240;
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  canvas.style.width = cssWidth + 'px';
+  canvas.style.height = cssHeight + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const points = (chartData && chartData.points) || [];
+  const padLeft = 64, padRight = 12, padTop = 12, padBottom = 34;
+  const plotW = Math.max(10, cssWidth - padLeft - padRight);
+  const plotH = cssHeight - padTop - padBottom;
+
+  ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
+  ctx.strokeStyle = '#e9ecef';
+  ctx.fillStyle = '#7f8c8d';
+
+  if (!points.length) {
+    ctx.textAlign = 'center';
+    ctx.fillText('暂无流量数据（服务刚上线或还没有采样）', cssWidth / 2, cssHeight / 2);
+    return;
+  }
+
+  const maxVal = niceMax(Math.max(...points.map(p => Math.max(p.downloaded, p.uploaded))));
+  const ticks = 4;
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= ticks; i++) {
+    const y = padTop + plotH - (plotH * i) / ticks;
+    const value = (maxVal * i) / ticks;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(padLeft + plotW, y);
+    ctx.stroke();
+    ctx.fillText(bytes(value), padLeft - 8, y + 4);
+  }
+
+  const slot = plotW / points.length;
+  const barW = Math.max(2, Math.min(18, slot / 2.6));
+  const d = new Date();
+
+  points.forEach((point, index) => {
+    const cx = padLeft + slot * (index + 0.5);
+    const hDl = (point.downloaded / maxVal) * plotH;
+    const hUl = (point.uploaded / maxVal) * plotH;
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(cx - barW - 1, padTop + plotH - hDl, barW, hDl);
+    ctx.fillStyle = '#27ae60';
+    ctx.fillRect(cx + 1, padTop + plotH - hUl, barW, hUl);
+
+    const every = Math.ceil(points.length / 8);
+    if (index % every === 0) {
+      d.setTime(point.ts * 1000);
+      const label = chartBucket === 'day'
+        ? (d.getMonth() + 1) + '-' + d.getDate()
+        : String(d.getHours()).padStart(2, '0') + ':00';
+      ctx.fillStyle = '#7f8c8d';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, cx, cssHeight - 12);
+    }
+  });
+}
+
+async function loadChart(name) {
+  try {
+    const resp = await fetchT('api/services/' + encodeURIComponent(name)
+      + '/traffic?days=' + chartDays + '&bucket=' + chartBucket);
+    if (resp.ok) chartData = await resp.json();
+  } catch (err) {
+    chartData = null;
+  }
+  drawChart();
+}
+
 const COLUMNS = [
   ['状态', row => '<span class="pill ' + (row.state === 'removed' ? 'off' : 'on') + '">'
       + (row.state === 'removed' ? '已删除' : '运行中') + '</span>', 'left'],
@@ -189,8 +297,8 @@ function renderDetail(data, rows) {
     ['占用空间', st.used_gb + ' / ' + svc.config.disk_gb + ' GB'],
     ['当前已下载', bytes(st.current_downloaded)],
     ['当前已上传', bytes(st.current_uploaded)],
-    ['启动以来下载', bytes(st.since_start_downloaded)],
-    ['启动以来上传', bytes(st.since_start_uploaded)],
+    ['上线以来下载', bytes(st.since_launch_downloaded)],
+    ['上线以来上传', bytes(st.since_launch_uploaded)],
     ['累计新增 / 移除', st.added_total + ' / ' + st.removed_total],
   ].map(p => '<div class="stat"><div class="v">' + esc(p[1]) + '</div><div class="k">'
     + esc(p[0]) + '</div></div>').join('');
@@ -204,12 +312,14 @@ function renderDetail(data, rows) {
     + (lastError ? '<div class="error-box">刷新失败：' + esc(lastError)
         + '<button id="retry">重试</button></div>' : '')
     + '<div class="summary">' + summary + '</div>'
+    + chartHtml()
     + '<div class="toolbar"><div class="filters">'
     + '<button data-filter="all" class="' + (filter === 'all' ? 'active' : '') + '">全部 ' + all.length + '</button>'
     + '<button data-filter="active" class="' + (filter === 'active' ? 'active' : '') + '">运行中 ' + (rows.active || []).length + '</button>'
     + '<button data-filter="removed" class="' + (filter === 'removed' ? 'active' : '') + '">已删除 ' + (rows.removed || []).length + '</button>'
     + '</div><span class="hint">' + new Date().toLocaleTimeString() + ' 更新</span></div>'
     + tableHtml(shown);
+  loadChart(svc.name);
 }
 
 // ---------- 数据加载 ----------
@@ -298,6 +408,19 @@ document.addEventListener('click', function (e) {
   if (actBtn) {
     e.stopPropagation();
     fire(actBtn.getAttribute('data-svc'), actBtn.getAttribute('data-act'));
+    return;
+  }
+  const daysBtn = e.target.closest('[data-days]');
+  if (daysBtn) {
+    chartDays = Number(daysBtn.getAttribute('data-days'));
+    if (chartDays > 3) chartBucket = 'day';
+    load();
+    return;
+  }
+  const bucketBtn = e.target.closest('[data-bucket]');
+  if (bucketBtn && !bucketBtn.disabled) {
+    chartBucket = bucketBtn.getAttribute('data-bucket');
+    load();
     return;
   }
   const filterBtn = e.target.closest('[data-filter]');

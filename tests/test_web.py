@@ -4,9 +4,16 @@ from fastapi.testclient import TestClient
 from app.web import create_app
 
 
+class FakeStore:
+    def traffic_rows(self, service, since_ts):
+        # 两小时的数据，方便测聚合
+        return [(1792650000, 100, 10), (1792653600, 200, 20), (1792657200, 300, 30)]
+
+
 class FakeRunner:
     def __init__(self, name="auto-test"):
         self.cfg = type("Cfg", (), {"name": name})()
+        self.store = FakeStore()
 
     def snapshot(self):
         return {
@@ -25,7 +32,7 @@ class FakeRunner:
             "stats": {
                 "used_gb": 12.5, "torrents": 3, "candidates": 100,
                 "current_downloaded": 1, "current_uploaded": 2,
-                "since_start_downloaded": 3, "since_start_uploaded": 4,
+                "since_launch_downloaded": 3, "since_launch_uploaded": 4,
                 "added_total": 5, "removed_total": 1,
                 "search_used": 1, "search_cap": 900,
                 "dl_used": 6, "dl_cap": 90,
@@ -84,6 +91,28 @@ def test_torrents_endpoint():
 
 def test_torrents_unknown_service_404():
     assert client().get("/api/services/nope/torrents").status_code == 404
+
+
+def test_traffic_endpoint_hour_bucket():
+    data = client().get("/api/services/auto-test/traffic?days=1&bucket=hour").json()
+    assert data["bucket"] == "hour"
+    assert len(data["points"]) == 3
+    assert data["points"][0]["downloaded"] == 100
+
+
+def test_traffic_endpoint_day_bucket_merges():
+    data = client().get("/api/services/auto-test/traffic?days=7&bucket=day").json()
+    assert data["bucket"] == "day"
+    total_dl = sum(p["downloaded"] for p in data["points"])
+    assert total_dl == 600
+
+
+def test_traffic_endpoint_rejects_bad_bucket():
+    assert client().get("/api/services/auto-test/traffic?bucket=week").status_code == 400
+
+
+def test_traffic_unknown_service_404():
+    assert client().get("/api/services/nope/traffic").status_code == 404
 
 
 def test_trigger_endpoint():
