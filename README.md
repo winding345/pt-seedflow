@@ -71,19 +71,56 @@ uv run python -m app.main
 
 ### Docker 部署
 
+**单容器**：MySQL 与应用装在同一个容器里，由一个入口脚本先拉起 MySQL 再启动应用。
+
 ```bash
+cp .env.example .env      # 改掉里面的密码
 docker compose up -d --build
 ```
 
-默认使用 `network_mode: host`，容器内可直接访问 `127.0.0.1:8085` 上的 qBittorrent，
-从而沿用 qB 的「本机免认证」规则；换成 bridge 网络会因来源 IP 变化而要求登录。
+容器使用 `network_mode: host`，因此：
+
+- 应用直接访问 `127.0.0.1:8085` 的 qBittorrent，沿用 qB 的「本机免认证」
+- 内置 MySQL 直接监听宿主机 `3366`，局域网里可以用任意 MySQL 客户端连接
 
 挂载：
 
 | 宿主机 | 容器 | 用途 |
 |---|---|---|
-| `~/.pt-seedflow` | `/root/.pt-seedflow` | 配置文件与 SQLite 状态库 |
+| `./data` | `/root/.pt-seedflow` | 启动用的 `config.yaml` |
+| `./mysql-data` | `/var/lib/mysql` | MySQL 数据目录（配置 + 统计） |
 | `~/.rss` | `/root/.rss:ro` | 站点 API Key（只读） |
+
+### 配置存放在 MySQL
+
+启动时的优先级：
+
+| 情况 | 行为 |
+|---|---|
+| 第一次启动（库里没有服务配置） | 用 `data/config.yaml` 初始化数据库 |
+| 之后启动 | **以数据库为准**，配置文件只用于首次初始化 |
+| 带 `--cfg_force` 或 `PT_CFG_FORCE=1` | 用 `data/config.yaml` **覆盖**数据库 |
+
+`bash force-config.sh` 就是「覆盖」那条路径。
+
+运行中每 5 分钟（`PT_CFG_RELOAD_SECONDS` 可调）从数据库重读一次服务配置，
+改完立即生效，不用重启：
+
+```bash
+mysql -h <nas-ip> -P 3366 -u ptsf -p ptsf \
+  -e "update services set config=JSON_SET(config,'\$.disk_gb',150) where name='auto-mteam-1'"
+```
+
+同样的改动也能在网页上做：服务卡片 →「编辑配置」→ 直接改 JSON → 保存。
+
+### 连接数据库
+
+| 项目 | 值 |
+|---|---|
+| 端口 | `3366` |
+| 库名 | `ptsf` |
+| 账号 | `ptsf`（密码见 `.env` 的 `MYSQL_PASSWORD`） |
+| 网络 | 局域网可达；无公网 IP |
 
 ### 测试
 
@@ -120,7 +157,9 @@ uv run pytest
 app/
   config.py        配置模型与校验
   bootstrap.py     首次启动生成配置、校验失败拒绝启动
-  store.py         SQLite：配额、上传量采样、删除历史
+  store.py         SQLite 实现（单测用）：配额、采样、历史
+  db.py            MySQL 实现与建表（生产用）
+  confrepo.py      配置读写 MySQL（含 --cfg_force 覆盖逻辑）
   scoring.py       候选打分
   lifecycle.py     加种/删除决策（纯函数）
   sites/           站点适配层

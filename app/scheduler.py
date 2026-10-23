@@ -67,6 +67,18 @@ class ServiceRunner:
     _last_prune_at: float = 0.0
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
+    def apply_config(self, cfg) -> None:
+        """热更新服务配置（来自数据库）。"""
+        with self._lock:
+            old = self.cfg.to_dict()
+            if old == cfg.to_dict():
+                return
+            self.cfg = cfg
+            # 配额放开后重新允许加种
+            if not self.quota_exhausted:
+                pass
+            self._log("config", "配置已更新", "来自数据库")
+
     # ---------- 工具 ----------
     def _log(self, kind: str, name: str, detail: str = "") -> None:
         self.actions.appendleft(Action(int(time.time()), kind, name, detail))
@@ -574,19 +586,46 @@ class ServiceRunner:
 class Scheduler(threading.Thread):
     """后台调度线程：固定 tick，逻辑顺序由各自 runner 保证。"""
 
-    def __init__(self, runners: List[ServiceRunner], tick_seconds: int):
+    def __init__(self, runners: List[ServiceRunner], tick_seconds: int,
+                 repo=None, reload_seconds: int = 300):
         super().__init__(daemon=True, name="pt-seedflow-scheduler")
         self.runners = runners
         self.tick_seconds = max(10, tick_seconds)
+        self.repo = repo
+        self.reload_seconds = max(5, reload_seconds)
+        self._last_reload = 0.0
+        self._last_tick = 0.0
         self._stop_event = threading.Event()
 
+    def _reload_configs(self) -> None:
+        """从数据库重读配置并热更新，改了 MySQL 五分钟内生效。"""
+        if not self.repo:
+            return
+        now = time.time()
+        if now - self._last_reload < self.reload_seconds:
+            return
+        self._last_reload = now
+        try:
+            configs = self.repo.service_configs()
+        except Exception:  # noqa: BLE001  数据库抖动时保持旧配置
+            return
+        for runner in self.runners:
+            incoming = configs.get(runner.cfg.name)
+            if incoming is not None:
+                runner.apply_config(incoming)
+
     def run(self) -> None:
-        # 启动后先跑一轮，便于立刻看到状态
+        # 配置重载与业务 tick 各自独立计时：
+        # 改了数据库配置不必等下一个 tick 才生效。
         while not self._stop_event.is_set():
-            for runner in self.runners:
-                if runner.cfg.enabled:
-                    runner.tick()
-            self._stop_event.wait(self.tick_seconds)
+            self._reload_configs()
+            now = time.time()
+            if now - self._last_tick >= self.tick_seconds:
+                self._last_tick = now
+                for runner in self.runners:
+                    if runner.cfg.enabled:
+                        runner.tick()
+            self._stop_event.wait(1.0)
 
     def stop(self) -> None:
         self._stop_event.set()

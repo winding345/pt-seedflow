@@ -25,3 +25,5 @@ venv/
 
 # uv 本地缓存（沙箱或受限环境用）
 .uv/
+.env
+mysql-data/

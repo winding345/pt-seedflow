@@ -9,6 +9,7 @@ from typing import List
 from fastapi import Body, FastAPI
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
+from .config import ServiceConfig
 from .scheduler import ServiceRunner
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -33,7 +34,7 @@ def _asset_version() -> int:
         return 0
 
 
-def create_app(runners: List[ServiceRunner], started_at: float) -> FastAPI:
+def create_app(runners: List[ServiceRunner], started_at: float, repo=None) -> FastAPI:
     app = FastAPI(title="pt-seedflow", docs_url=None, redoc_url=None)
 
     # ---------- API ----------
@@ -70,6 +71,29 @@ def create_app(runners: List[ServiceRunner], started_at: float) -> FastAPI:
         if runner is None:
             return JSONResponse({"error": "未知服务: %s" % name}, status_code=404)
         return JSONResponse(runner.torrent_rows())
+
+    @app.get("/api/services/{name}/config")
+    def get_service_config(name: str) -> JSONResponse:
+        runner = next((r for r in runners if r.cfg.name == name), None)
+        if runner is None:
+            return JSONResponse({"error": "未知服务: %s" % name}, status_code=404)
+        return JSONResponse(runner.cfg.to_dict())
+
+    @app.put("/api/services/{name}/config")
+    def put_service_config(name: str, payload: dict = Body(...)) -> JSONResponse:
+        runner = next((r for r in runners if r.cfg.name == name), None)
+        if runner is None:
+            return JSONResponse({"error": "未知服务: %s" % name}, status_code=404)
+        data = dict(payload or {})
+        data["name"] = name
+        try:
+            service = ServiceConfig.from_dict(data)
+        except Exception as exc:  # noqa: BLE001  不做复杂校验，但格式错误要能提示
+            return JSONResponse({"error": "配置格式错误: %s" % exc}, status_code=400)
+        if repo is not None:
+            repo.save_service(service)
+        runner.apply_config(service)
+        return JSONResponse({"ok": True, "config": service.to_dict()})
 
     @app.get("/api/services/{name}/traffic")
     def service_traffic(name: str, days: int = 1, bucket: str = "hour") -> JSONResponse:

@@ -49,6 +49,20 @@ class Limits:
     dl_per_day: int = 1000
     safety: float = 0.9
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {"search_per_day": self.search_per_day,
+                "dl_per_day": self.dl_per_day,
+                "safety": self.safety}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Limits":
+        data = data or {}
+        return cls(
+            search_per_day=int(data.get("search_per_day", 1000)),
+            dl_per_day=int(data.get("dl_per_day", 1000)),
+            safety=float(data.get("safety", 0.9)),
+        )
+
     @property
     def search_cap(self) -> int:
         return max(1, int(self.search_per_day * self.safety))
@@ -66,6 +80,23 @@ class SiteConfig:
     api_key: str = ""
     api_key_file: str = ""
     timeout: int = 25
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"name": self.name, "base_url": self.base_url,
+                "user_agent": self.user_agent, "api_key_file": self.api_key_file,
+                "timeout": self.timeout}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SiteConfig":
+        data = data or {}
+        return cls(
+            name=str(data.get("name") or ""),
+            base_url=str(data.get("base_url") or "").rstrip("/"),
+            user_agent=str(data.get("user_agent") or "Mozilla/5.0"),
+            api_key=str(data.get("api_key") or ""),
+            api_key_file=str(data.get("api_key_file") or ""),
+            timeout=int(data.get("timeout", 25)),
+        )
 
     def resolve_key(self) -> str:
         """优先使用 api_key，其次读文件；两者都没有则报错。"""
@@ -88,6 +119,28 @@ class DownloaderConfig:
     username: str = ""
     password: str = ""
     timeout: int = 20
+
+
+@dataclass
+class DownloaderConfig:
+    base_url: str = "http://127.0.0.1:8085"
+    username: str = ""
+    password: str = ""
+    timeout: int = 20
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"base_url": self.base_url, "username": self.username,
+                "password": self.password, "timeout": self.timeout}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DownloaderConfig":
+        data = data or {}
+        return cls(
+            base_url=str(data.get("base_url") or "http://127.0.0.1:8085").rstrip("/"),
+            username=str(data.get("username") or ""),
+            password=str(data.get("password") or ""),
+            timeout=int(data.get("timeout", 20)),
+        )
 
 
 @dataclass
@@ -114,6 +167,11 @@ class ServiceConfig:
     search_interval_seconds: int = 3600
     limits: Limits = field(default_factory=Limits)
 
+    def __post_init__(self) -> None:
+        # qB 分类默认与服名一致，避免配置里漏填导致操作到别人的任务
+        if not self.category:
+            self.category = self.name
+
     @property
     def disk_bytes(self) -> int:
         return int(self.disk_gb * 1024 ** 3)
@@ -126,6 +184,60 @@ class ServiceConfig:
     def size_bytes_range(self) -> "tuple[int, int]":
         low, high = self.size_mb[0], self.size_mb[1]
         return int(low * 1024 ** 2), int(high * 1024 ** 2)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "site": self.site,
+            "enabled": self.enabled,
+            "dry_run": self.dry_run,
+            "disk_gb": self.disk_gb,
+            "discounts": list(self.discounts),
+            "categories": list(self.categories),
+            "size_mb": list(self.size_mb),
+            "save_path": self.save_path,
+            "category": self.category,
+            "delete_threshold_mb": self.delete_threshold_mb,
+            "window_minutes": self.window_minutes,
+            "exempt_minutes": self.exempt_minutes,
+            "min_keep_minutes": self.min_keep_minutes,
+            "max_torrents": self.max_torrents,
+            "add_per_tick": self.add_per_tick,
+            "delete_unfinished_after_discount": self.delete_unfinished_after_discount,
+            "search_interval_seconds": self.search_interval_seconds,
+            "limits": self.limits.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ServiceConfig":
+        data = data or {}
+        name = str(data.get("name") or "")
+        site = str(data.get("site") or "")
+        if not name or not site:
+            raise ConfigError("服务配置缺少 name 或 site")
+        return cls(
+            name=name,
+            site=site,
+            enabled=bool(data.get("enabled", True)),
+            dry_run=bool(data.get("dry_run", True)),
+            disk_gb=float(data.get("disk_gb", 50)),
+            discounts=[str(x) for x in (data.get("discounts") or [])],
+            categories=[int(x) for x in (data.get("categories") or [])],
+            size_mb=[float((data.get("size_mb") or [1024, 102400])[0]),
+                     float((data.get("size_mb") or [1024, 102400])[1])],
+            save_path=str(data.get("save_path") or ""),
+            category=str(data.get("category") or name),
+            delete_threshold_mb=float(data.get("delete_threshold_mb", 1024)),
+            window_minutes=int(data.get("window_minutes", 60)),
+            exempt_minutes=int(data.get("exempt_minutes", 60)),
+            min_keep_minutes=int(data.get("min_keep_minutes", 120)),
+            max_torrents=int(data.get("max_torrents", 30)),
+            add_per_tick=int(data.get("add_per_tick", 2)),
+            delete_unfinished_after_discount=bool(
+                data.get("delete_unfinished_after_discount", True)),
+            search_interval_seconds=int(data.get("search_interval_seconds", 3600)),
+            limits=Limits.from_dict(data.get("limits") or {}),
+        )
 
     def allows_discount(self, discount: Optional[str]) -> bool:
         value = (discount or "NORMAL").strip()

@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from app.config import ConfigError, load_config
+from app.config import (ConfigError, DownloaderConfig, Limits, ServiceConfig,
+                        SiteConfig, load_config)
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 
@@ -173,3 +174,35 @@ def test_discount_end_matches_source():
         assert candidate.discount_end is not None
     else:
         assert candidate.discount_end is None
+
+
+def test_service_config_roundtrip():
+    svc = ServiceConfig(
+        name="demo", site="mteam", disk_gb=150, size_mb=[5120, 102400],
+        max_torrents=60, add_per_tick=5, search_interval_seconds=1800,
+        delete_unfinished_after_discount=False,
+        limits=Limits(search_per_day=1000, dl_per_day=100, safety=0.9),
+    )
+    again = ServiceConfig.from_dict(svc.to_dict())
+    assert again.to_dict() == svc.to_dict()
+
+
+def test_site_and_downloader_roundtrip():
+    site = SiteConfig(name="mteam", base_url="https://api.m-team.cc",
+                      user_agent="UA/1.0", api_key_file="~/.rss/key", timeout=30)
+    assert SiteConfig.from_dict(site.to_dict()).to_dict() == site.to_dict()
+
+    # 结尾斜杠会被规整掉，这是预期行为
+    slashed = SiteConfig(name="mteam", base_url="https://api.m-team.cc/",
+                         user_agent="UA/1.0", timeout=30)
+    assert SiteConfig.from_dict(slashed.to_dict()).base_url == "https://api.m-team.cc"
+
+    dl = DownloaderConfig(base_url="http://127.0.0.1:8085", username="u",
+                          password="p", timeout=15)
+    assert DownloaderConfig.from_dict(dl.to_dict()).to_dict() == dl.to_dict()
+
+
+def test_service_config_requires_name_and_site():
+    import pytest
+    with pytest.raises(ConfigError):
+        ServiceConfig.from_dict({"name": "", "site": "mteam"})

@@ -9,6 +9,7 @@ let services = [];
 let lastError = null;
 let filter = 'all';
 let detailName = null;
+let editingName = null;
 
 // ---------- 工具 ----------
 function esc(s) {
@@ -118,6 +119,7 @@ function cardHtml(s) {
     + (s.last_error ? '<div class="error-box" style="margin-top:12px">' + esc(s.last_error) + '</div>' : '')
     + '<div class="card-foot">'
     + '<button data-detail="' + esc(s.name) + '">查看任务</button>'
+    + '<button class="ghost" data-config="' + esc(s.name) + '">编辑配置</button>'
     + '<button class="ghost" data-search="' + esc(s.name) + '">手动 search</button>'
     + '<button class="ghost" data-act="add" data-svc="' + esc(s.name) + '">手动加种</button>'
     + '<button class="ghost" data-act="delete" data-svc="' + esc(s.name) + '">手动删种</button>'
@@ -323,8 +325,57 @@ function renderDetail(data, rows) {
   loadChart(svc.name);
 }
 
+// ---------- 配置编辑 ----------
+async function renderEditor(name) {
+  let cfg;
+  try {
+    const resp = await fetchT('api/services/' + encodeURIComponent(name) + '/config');
+    cfg = await resp.json();
+    if (cfg.error) throw new Error(cfg.error);
+  } catch (err) {
+    app.innerHTML = '<div class="top"><h1>配置</h1></div>'
+      + '<div class="error-box">读取配置失败：' + esc(err) + '</div>';
+    return;
+  }
+  app.innerHTML =
+    '<div class="detail-top"><a class="back" href="#/service/' + encodeURIComponent(name) + '">← 返回</a>'
+    + '<h1>' + esc(name) + ' 配置</h1></div>'
+    + '<div class="hint" style="margin-bottom:10px">保存后立即生效，并写入 MySQL；'
+    + '不校验字段，格式错误会提示。</div>'
+    + '<textarea id="cfgText" spellcheck="false">' + esc(JSON.stringify(cfg, null, 2)) + '</textarea>'
+    + '<div class="card-foot"><button id="saveCfg">保存</button>'
+    + '<button class="ghost" id="cancelCfg">取消</button></div>';
+
+  document.getElementById('saveCfg').addEventListener('click', async function () {
+    let data;
+    try {
+      data = JSON.parse(document.getElementById('cfgText').value);
+    } catch (err) {
+      alert('JSON 解析失败：' + err.message);
+      return;
+    }
+    try {
+      const resp = await fetchT('api/services/' + encodeURIComponent(name) + '/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      const result = await resp.json();
+      if (result.error) { alert(result.error); return; }
+      alert('已保存并生效');
+      location.hash = '#/service/' + encodeURIComponent(name);
+    } catch (err) {
+      alert('保存失败：' + err);
+    }
+  });
+  document.getElementById('cancelCfg').addEventListener('click', function () {
+    location.hash = '#/service/' + encodeURIComponent(name);
+  });
+}
+
 // ---------- 数据加载 ----------
 async function load() {
+  if (editingName) return;      // 编辑页自己管理数据
   let data;
   try {
     const resp = await fetchT(ENDPOINT);
@@ -387,6 +438,14 @@ async function fire(name, action) {
 
 // ---------- 路由与事件 ----------
 function route() {
+  const edit = location.hash.match(/^#\/service\/([^/]+)\/config$/);
+  if (edit) {
+    editingName = decodeURIComponent(edit[1]);
+    detailName = null;
+    renderEditor(editingName);
+    return;
+  }
+  editingName = null;
   const m = location.hash.match(/^#\/service\/(.+)$/);
   detailName = m ? decodeURIComponent(m[1]) : null;
   filter = 'all';
@@ -397,6 +456,12 @@ document.addEventListener('click', function (e) {
   const detailBtn = e.target.closest('[data-detail]');
   if (detailBtn) {
     location.hash = '#/service/' + encodeURIComponent(detailBtn.getAttribute('data-detail'));
+    return;
+  }
+  const configBtn = e.target.closest('button[data-config]');
+  if (configBtn) {
+    e.stopPropagation();
+    location.hash = '#/service/' + encodeURIComponent(configBtn.getAttribute('data-config')) + '/config';
     return;
   }
   const searchBtn = e.target.closest('button[data-search]');
