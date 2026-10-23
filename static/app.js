@@ -317,7 +317,8 @@ function renderDetail(data, rows) {
     + '<button data-filter="all" class="' + (filter === 'all' ? 'active' : '') + '">全部 ' + all.length + '</button>'
     + '<button data-filter="active" class="' + (filter === 'active' ? 'active' : '') + '">运行中 ' + (rows.active || []).length + '</button>'
     + '<button data-filter="removed" class="' + (filter === 'removed' ? 'active' : '') + '">已删除 ' + (rows.removed || []).length + '</button>'
-    + '</div><span class="hint">' + new Date().toLocaleTimeString() + ' 更新</span></div>'
+    + '</div><span class="hint">' + new Date().toLocaleTimeString() + ' 更新'
+    + ' <button class="ghost" id="refreshDetail">刷新</button></span></div>'
     + tableHtml(shown);
   loadChart(svc.name);
 }
@@ -429,7 +430,7 @@ document.addEventListener('click', function (e) {
     load();
     return;
   }
-  if (e.target.id === 'retry') {
+  if (e.target.id === 'retry' || e.target.id === 'refreshDetail') {
     load();
     return;
   }
@@ -441,4 +442,6 @@ document.addEventListener('click', function (e) {
 
 window.addEventListener('hashchange', route);
 route();
-setInterval(load, REFRESH_MS);
+setInterval(function () {
+  if (!detailName) load();      // 详情页不自动刷新，避免打断阅读
+}, REFRESH_MS);

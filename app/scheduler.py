@@ -464,7 +464,11 @@ class ServiceRunner:
 
         current_dl = sum(getattr(t, "downloaded", 0) for t in self.torrents_cache)
         current_ul = sum(getattr(t, "uploaded", 0) for t in self.torrents_cache)
-        total_dl, total_ul = self.store.traffic_total(cfg.name)
+        # "上线以来" = 所有任务（运行中 + 已删除）的下载/上传总和，
+        # 不依赖本进程启动时间，也不依赖 traffic 表何时建立
+        archived_dl, archived_ul = self.store.archive_totals(cfg.name)
+        total_dl = current_dl + archived_dl
+        total_ul = current_ul + archived_ul
 
         return {
             "name": cfg.name,

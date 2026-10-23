@@ -289,6 +289,15 @@ class Store:
                  int(published_at) if published_at else None),
             )
 
+    def archive_totals(self, service: str) -> tuple:
+        """已删除任务的最终下载/上传量之和。"""
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(SUM(downloaded),0), COALESCE(SUM(uploaded),0)"
+                " FROM torrent_archive WHERE service=?", (service,))
+            row = cur.fetchone()
+        return int(row[0]), int(row[1])
+
     def archived_torrents(self, service: str, limit: int = 200) -> List[dict]:
         with self._cursor() as cur:
             cur.execute(

@@ -153,3 +153,12 @@ def test_traffic_total_survives_reopen(tmp_path):
     second = Store(path)
     assert second.traffic_total("s1") == (10, 1)
     second.close()
+
+
+def test_archive_totals(tmp_path):
+    store = make_store(tmp_path)
+    now = int(time.time())
+    store.archive_torrent("s1", "h1", "a", 100, 40, 80, 0.4, removed_at=now)
+    store.archive_torrent("s1", "h2", "b", 200, 60, 120, 0.9, removed_at=now)
+    assert store.archive_totals("s1") == (100, 200)
+    assert store.archive_totals("s2") == (0, 0)
