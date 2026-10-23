@@ -64,6 +64,7 @@ class ServiceRunner:
     # 最近一次 qB 任务快照，供详情页使用（避免 Web 端反查 qB）
     torrents_cache: List[object] = field(default_factory=list)
     _cache_restored: bool = False
+    _last_prune_at: float = 0.0
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     # ---------- 工具 ----------
@@ -133,6 +134,7 @@ class ServiceRunner:
                 self.torrent_count = len(torrents)
                 if not self.quota_exhausted:
                     self._step_add(torrents)
+                self._maybe_prune()
             except QBError as exc:
                 self.last_error = str(exc)
                 self._log("error", "-", str(exc))
@@ -197,6 +199,20 @@ class ServiceRunner:
 
             return {"service": self.cfg.name, "action": action,
                     "done": done, "snapshot": self.snapshot()}
+
+    def _maybe_prune(self) -> None:
+        """每天清理一次过期明细，避免 SQLite 无限增长。"""
+        now = time.time()
+        if now - self._last_prune_at < 86400:
+            return
+        self._last_prune_at = now
+        try:
+            # 上传量采样只需保留窗口的一倍
+            self.store.prune_samples(int(now - max(self.cfg.window_minutes * 60 * 2, 7200)))
+            # 流量明细保留 90 天
+            self.store.prune_traffic(int(now - 90 * 86400))
+        except Exception:  # noqa: BLE001  清理失败不影响主流程
+            pass
 
     def _reconcile_new_hash(self, known_hashes) -> Optional[str]:
         """加种后 qB 才分配 hash：对比前后列表，找出新增的那个。"""
