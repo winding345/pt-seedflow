@@ -314,11 +314,21 @@ class ServiceRunner:
             self._log("quota", "search", "每日额度已用尽 %d/%d" % (used, cap))
             return False
 
-        try:
-            candidates = self.site.search(page=1, page_size=SEARCH_PAGE_SIZE)
-        except Exception as exc:  # noqa: BLE001
-            self._log("error", "search", str(exc))
-            self.last_error = str(exc)
+        candidates = None
+        for attempt in range(3):
+            try:
+                candidates = self.site.search(page=1, page_size=SEARCH_PAGE_SIZE)
+                break
+            except Exception as exc:  # noqa: BLE001
+                text = str(exc)
+                transient = any(k in text for k in (
+                    "连接失败", "Connection reset", "timed out", "超时", "Errno 104"))
+                if not transient or attempt >= 2:
+                    self._log("error", "search", text)
+                    self.last_error = text
+                    return False
+                time.sleep(2.0 * (attempt + 1))
+        if candidates is None:
             return False
 
         self.store.quota_add(self.cfg.name, "search", today())
