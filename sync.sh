@@ -1,26 +1,35 @@
 #!/usr/bin/env bash
-# 只负责同步代码：先试默认远端，失败再试 GitHub 加速镜像。
-# 拉取成功后再运行 deploy.sh。
+# 同步代码到最新 main。
+#
+# 设计要点：
+# - 多镜像轮询，单个源只等 20 秒，避免卡在一个挂掉的镜像上
+# - 直接 fetch + reset --hard：这个目录是部署用，不允许有本地改动挡路
+# - 可用 PT_MIRROR 指定单个源，比如 PT_MIRROR=https://ghfast.top
 set -uo pipefail
 cd "$(dirname "$0")"
 
-MIRROR="${PT_MIRROR:-https://ghproxy.net/https://github.com/winding345/pt-seedflow.git}"
+REPO="https://github.com/winding345/pt-seedflow.git"
+MIRRORS=(
+  "https://gh-proxy.com/https://github.com/winding345/pt-seedflow.git"
+  "https://ghfast.top/https://github.com/winding345/pt-seedflow.git"
+  "https://ghproxy.net/https://github.com/winding345/pt-seedflow.git"
+  "$REPO"
+)
 
-echo "--- 尝试 origin（最多 45s）---"
-if GIT_TERMINAL_PROMPT=0 timeout 45 git pull --ff-only; then
-  echo "[ok] 已从 origin 更新"
-  git log --oneline -1
-  exit 0
+if [ -n "${PT_MIRROR:-}" ]; then
+  MIRRORS=("$PT_MIRROR")
 fi
 
-echo "--- origin 失败，尝试镜像 ---"
-echo "    $MIRROR"
-if GIT_TERMINAL_PROMPT=0 timeout 60 git pull --ff-only "$MIRROR" main; then
-  echo "[ok] 已从镜像更新"
-  git log --oneline -1
-  exit 0
-fi
+for url in "${MIRRORS[@]}"; do
+  printf -- '--- %s（最多 20s）---\n' "$url"
+  if GIT_TERMINAL_PROMPT=0 timeout 20 git fetch --no-tags "$url" main 2>&1; then
+    git reset --hard FETCH_HEAD >/dev/null
+    echo "[ok] 已更新"
+    git log --oneline -1
+    exit 0
+  fi
+done
 
-echo "[fail] origin 与镜像都不可用"
-echo "提示：可改用 Gitee，见 README 的同步说明"
+echo "[fail] 所有源都不可用" >&2
+echo "换一个源重试：PT_MIRROR=https://gh-proxy.com/https://github.com/winding345/pt-seedflow.git bash sync.sh" >&2
 exit 1
