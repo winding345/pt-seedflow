@@ -55,6 +55,17 @@ SCHEMA = [
         PRIMARY KEY (service, k)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
 
+    """CREATE TABLE IF NOT EXISTS torrent_meta (
+        service VARCHAR(64) NOT NULL,
+        hash VARCHAR(64) NOT NULL,
+        tid VARCHAR(64),
+        discount VARCHAR(32),
+        discount_end BIGINT NULL,
+        published_at BIGINT NULL,
+        added_at BIGINT,
+        PRIMARY KEY (service, hash)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+
     """CREATE TABLE IF NOT EXISTS service_state (
         service VARCHAR(64) NOT NULL,
         k VARCHAR(64) NOT NULL,
@@ -310,6 +321,27 @@ class MySQLStore:
         rows = self.db.query("SELECT v FROM counters WHERE service=%s AND k=%s",
                              (service, key))
         return int(rows[0][0]) if rows else 0
+
+    # ---------- 种子元数据（促销截止、发布时间） ----------
+    def set_meta(self, service: str, hash_: str, tid: str, discount: str,
+                 discount_end: Optional[int], added_at: Optional[int] = None,
+                 published_at: Optional[int] = None) -> None:
+        self.db.execute(
+            "INSERT INTO torrent_meta(service, hash, tid, discount, discount_end,"
+            " published_at, added_at) VALUES (%s,%s,%s,%s,%s,%s,%s)"
+            " ON DUPLICATE KEY UPDATE tid=VALUES(tid), discount=VALUES(discount),"
+            " discount_end=VALUES(discount_end), published_at=VALUES(published_at)",
+            (service, hash_, str(tid), discount,
+             int(discount_end) if discount_end else None,
+             int(published_at) if published_at else None,
+             int(added_at if added_at is not None else time.time())))
+
+    def meta_map(self, service: str) -> dict:
+        rows = self.db.query(
+            "SELECT hash, tid, discount, discount_end, added_at, published_at"
+            " FROM torrent_meta WHERE service=%s", (service,))
+        return {row[0]: {"tid": row[1], "discount": row[2], "discount_end": row[3],
+                         "added_at": row[4], "published_at": row[5]} for row in rows}
 
     # ---------- 键值 ----------
     def kv_set(self, service: str, key: str, value: int) -> None:

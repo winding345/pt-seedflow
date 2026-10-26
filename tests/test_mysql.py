@@ -73,3 +73,13 @@ def test_mysql_store_traffic_and_archive(db):
 
     store.archive_torrent("s1", "h1", "n", 10, 4, 8, 0.5, removed_at=now)
     assert store.archive_totals("s1") == (4, 8)
+
+
+def test_mysql_store_matches_sqlite_api():
+    """两套存储必须暴露同一组方法，避免生产缺方法、单测却全绿。"""
+    from app.db import MySQLStore
+    from app.store import Store
+
+    sqlite_api = {n for n in dir(Store) if not n.startswith("_")}
+    mysql_api = {n for n in dir(MySQLStore) if not n.startswith("_")}
+    assert sqlite_api - mysql_api == set(), "MySQLStore 缺少: %s" % sorted(sqlite_api - mysql_api)
