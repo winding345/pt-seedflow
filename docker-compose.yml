@@ -9,6 +9,11 @@ services:
     # 使用 host 网络：qBittorrent 的"本机免认证"只对 127.0.0.1 生效，
     # 桥接网络下容器来源 IP 会被拒（403）；容器内的 MySQL 也因此直接监听 3366。
     network_mode: host
+    # 注意：host 网络下 ports 不会被 Docker 使用（会提示 discarded），
+    # 保留是为了让飞牛/fnConnect 能从 compose 声明里识别出可访问的端口。
+    ports:
+      - "8600:8600"      # Web 面板
+      - "3366:3366"      # 容器内 MySQL（仅 MySQL 版需要）
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
