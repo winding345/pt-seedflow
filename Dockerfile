@@ -15,6 +15,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY app ./app
 COPY config ./config
 COPY static ./static
+COPY tools ./tools
 
 ENV PATH="/app/.venv/bin:$PATH"
 
