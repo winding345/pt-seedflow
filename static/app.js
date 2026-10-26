@@ -119,6 +119,7 @@ function cardHtml(s) {
     + (s.last_error ? '<div class="error-box" style="margin-top:12px">' + esc(s.last_error) + '</div>' : '')
     + '<div class="card-foot">'
     + '<button data-detail="' + esc(s.name) + '">查看任务</button>'
+    + '<button class="ghost" data-reload="' + esc(s.name) + '" title="从数据库重读配置">重载</button>'
     + '<button class="ghost" data-config="' + esc(s.name) + '">编辑配置</button>'
     + '<button class="ghost" data-search="' + esc(s.name) + '">手动 search</button>'
     + '<button class="ghost" data-act="add" data-svc="' + esc(s.name) + '">手动加种</button>'
@@ -685,6 +686,15 @@ document.addEventListener('click', function (e) {
   const detailBtn = e.target.closest('[data-detail]');
   if (detailBtn) {
     location.hash = '#/service/' + encodeURIComponent(detailBtn.getAttribute('data-detail'));
+    return;
+  }
+  const reloadBtn = e.target.closest('button[data-reload]');
+  if (reloadBtn) {
+    e.stopPropagation();
+    fetchT('api/reload', {method: 'POST'})
+      .then(r => r.json())
+      .then(d => { if (d.failed && d.failed.length) alert('部分失败：' + d.failed.join('; ')); })
+      .catch(err => alert('重载失败：' + err));
     return;
   }
   const configBtn = e.target.closest('button[data-config]');

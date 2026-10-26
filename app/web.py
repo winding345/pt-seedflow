@@ -128,6 +128,26 @@ def create_app(runners: List[ServiceRunner], started_at: float, repo=None) -> Fa
                 return JSONResponse({"ok": True, "warning": "已保存，但重建适配器失败: %s" % exc})
         return JSONResponse({"ok": True})
 
+    @app.post("/api/reload")
+    def reload_configs() -> JSONResponse:
+        """从数据库重读站点配置并重建所有适配器，保存后立即止血用。"""
+        if repo is None:
+            return JSONResponse({"error": "配置未启用"}, status_code=503)
+        from .sites import create_site
+        rebuilt, failed = [], []
+        for runner in runners:
+            site_cfg = repo.get_site(runner.cfg.site)
+            if site_cfg is None:
+                continue
+            try:
+                runner.site = create_site(site_cfg)
+                runner._site_signature = repr(sorted(site_cfg.to_dict().items(), key=lambda kv: kv[0]))
+                rebuilt.append(runner.cfg.name)
+                runner._log("config", "配置已重载", runner.cfg.site)
+            except Exception as exc:  # noqa: BLE001
+                failed.append("%s: %s" % (runner.cfg.name, exc))
+        return JSONResponse({"ok": True, "rebuilt": rebuilt, "failed": failed})
+
     @app.get("/api/services/{name}/traffic")
     def service_traffic(name: str, days: int = 1, bucket: str = "hour") -> JSONResponse:
         runner = next((r for r in runners if r.cfg.name == name), None)
