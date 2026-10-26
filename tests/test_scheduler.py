@@ -95,3 +95,50 @@ def test_restore_is_noop_when_cache_empty():
     runner.last_search_at = 0
     runner._restore_candidates()
     assert runner.candidates == []
+
+
+def _runner_for_refresh(**overrides):
+    """构造一个只用于测试 _need_refresh 的 runner。"""
+    from app.config import ServiceConfig
+
+    cfg = ServiceConfig(name="demo", site="mteam", **overrides)
+    runner = object.__new__(ServiceRunner)
+    runner.cfg = cfg
+    runner.ticks_since_search = 0
+    runner.refresh_every_ticks = 12
+    runner.last_search_at = 0.0
+    runner._pool_exhausted = False
+    return runner
+
+
+def test_refresh_waits_for_period_by_default():
+    import time
+    runner = _runner_for_refresh(refill_when_empty=False)
+    runner.last_search_at = time.time() - 3600
+    assert runner._need_refresh() is False
+    runner.ticks_since_search = 12
+    assert runner._need_refresh() is True
+
+
+def test_refill_triggers_when_pool_empty_after_cooldown(monkeypatch):
+    import time
+    runner = _runner_for_refresh(refill_min_seconds=600)
+    runner._pool_exhausted = True
+    runner.last_search_at = time.time() - 700     # 超过补池冷却
+    assert runner._need_refresh() is True
+
+
+def test_refill_respects_cooldown(monkeypatch):
+    import time
+    runner = _runner_for_refresh(refill_min_seconds=600)
+    runner._pool_exhausted = True
+    runner.last_search_at = time.time() - 60      # 还没到补池冷却
+    assert runner._need_refresh() is False
+
+
+def test_no_refill_when_pool_not_empty():
+    import time
+    runner = _runner_for_refresh(refill_min_seconds=600)
+    runner._pool_exhausted = False
+    runner.last_search_at = time.time() - 700
+    assert runner._need_refresh() is False

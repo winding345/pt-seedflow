@@ -64,6 +64,7 @@ class ServiceRunner:
     # 最近一次 qB 任务快照，供详情页使用（避免 Web 端反查 qB）
     torrents_cache: List[object] = field(default_factory=list)
     _cache_restored: bool = False
+    _pool_exhausted: bool = False
     _last_prune_at: float = 0.0
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -100,7 +101,12 @@ class ServiceRunner:
             self.last_search_at = float(saved_at)
 
     def _need_refresh(self) -> bool:
-        return self.ticks_since_search >= self.refresh_every_ticks
+        """定时刷新；候选池被吃空时按更短的冷却提前补一轮。"""
+        if self.ticks_since_search >= self.refresh_every_ticks:
+            return True
+        if self._pool_exhausted and self.cfg.refill_when_empty and self.last_search_at:
+            return (time.time() - self.last_search_at) >= self.cfg.refill_min_seconds
+        return False
 
     def _account(self, torrents) -> None:
         """把每个任务的增量记到当前小时桶（含已删除任务，删除前会补最后一次）。"""
@@ -139,7 +145,9 @@ class ServiceRunner:
                 self._account(torrents)
                 self._step_delete(torrents)
                 if self._need_refresh():
-                    self._step_search()
+                    refilling = (self._pool_exhausted
+                                 and self.ticks_since_search < self.refresh_every_ticks)
+                    self._step_search(force=refilling)
                 # 删除后重新取一次，保证空间与任务数是最新的
                 torrents = self.qb.list_torrents(category=self.cfg.category)
                 self.used_bytes = sum(t.size for t in torrents)
@@ -379,8 +387,12 @@ class ServiceRunner:
             json.dumps([c.as_dict() for c in candidates], ensure_ascii=False),
             int(self.last_search_at),
         )
-        self._log("search", "候选池", "%d 个候选%s" % (
-            len(candidates), "（手动）" if force else ""))
+        detail = "%d 个候选" % len(candidates)
+        if force and self._pool_exhausted:
+            detail += "（池子空了，提前补）"
+        elif force:
+            detail += "（手动）"
+        self._log("search", "候选池", detail)
         return True
 
     # ---------- 加种 ----------
@@ -414,6 +426,12 @@ class ServiceRunner:
             exclude_tids=exclude,
             max_adds=max_adds,
         )
+
+        if not plan.picks:
+            # 空间不足/配额/并发上限都不是"池子空"，只有候选本身没有可用项才算
+            self._pool_exhausted = plan.stop_reason in ("没有符合条件的新候选",)
+        else:
+            self._pool_exhausted = False
 
         for pick in plan.picks:
             if pick.candidate.name in current_names:

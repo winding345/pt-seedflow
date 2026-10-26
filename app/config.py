@@ -184,6 +184,10 @@ class ServiceConfig:
     delete_unfinished_after_discount: bool = True
     # search 强制最小间隔（秒）
     search_interval_seconds: int = 3600
+    # 候选池被吃光时是否提前补一轮
+    refill_when_empty: bool = True
+    # 提前补池的最小间隔（秒），避免对站点太频繁
+    refill_min_seconds: int = 600
     limits: Limits = field(default_factory=Limits)
 
     def __post_init__(self) -> None:
@@ -224,6 +228,8 @@ class ServiceConfig:
             "add_per_tick": self.add_per_tick,
             "delete_unfinished_after_discount": self.delete_unfinished_after_discount,
             "search_interval_seconds": self.search_interval_seconds,
+            "refill_when_empty": self.refill_when_empty,
+            "refill_min_seconds": self.refill_min_seconds,
             "limits": self.limits.to_dict(),
         }
 
@@ -255,6 +261,8 @@ class ServiceConfig:
             delete_unfinished_after_discount=bool(
                 data.get("delete_unfinished_after_discount", True)),
             search_interval_seconds=int(data.get("search_interval_seconds", 3600)),
+            refill_when_empty=bool(data.get("refill_when_empty", True)),
+            refill_min_seconds=int(data.get("refill_min_seconds", 600)),
             limits=Limits.from_dict(data.get("limits") or {}),
         )
 
