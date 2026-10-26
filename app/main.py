@@ -32,9 +32,15 @@ def build_runners(config, store) -> list:
         if not service.enabled:
             continue
         site_cfg = config.sites[service.site]
+        try:
+            site = create_site(site_cfg)
+        except Exception as exc:  # noqa: BLE001  单个站点失败不应拖垮整个服务
+            sys.stderr.write("站点 %s 初始化失败，跳过服务 %s：%s\n"
+                             % (service.site, service.name, exc))
+            continue
         runners.append(ServiceRunner(
             cfg=service,
-            site=create_site(site_cfg),
+            site=site,
             qb=qb,
             store=store,
             tick_seconds=config.tick_seconds,

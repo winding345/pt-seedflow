@@ -206,3 +206,26 @@ def test_service_config_requires_name_and_site():
     import pytest
     with pytest.raises(ConfigError):
         ServiceConfig.from_dict({"name": "", "site": "mteam"})
+
+
+def test_create_site_supports_all_builtin_types():
+    """注册表必须包含全部内置适配器，避免生产启动时才报“未知站点类型”。"""
+    from app.sites import create_site
+    from app.sites.base import SiteError
+
+    cases = [
+        SiteConfig(name="mteam", base_url="https://api.m-team.cc", user_agent="ua",
+                   api_key="k"),
+        SiteConfig(name="pttime", base_url="https://www.pttime.org", user_agent="ua",
+                   type="nexusphp", rss_url="https://x/rss"),
+        SiteConfig(name="pttime2", base_url="https://www.pttime.org", user_agent="ua",
+                   type="nexusphp_html", list_url="torrents.php"),
+        SiteConfig(name="carpt", base_url="https://carpt.net", user_agent="ua",
+                   type="nexusphp_html", list_url="torrents.php"),
+    ]
+    for cfg in cases:
+        site = create_site(cfg)
+        assert site is not None
+    with pytest.raises(SiteError):
+        create_site(SiteConfig(name="x", base_url="https://x", user_agent="ua",
+                               type="nope", list_url="y"))
