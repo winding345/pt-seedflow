@@ -247,6 +247,36 @@ services:
 **注意**：pttime 明确提示「高频请求压力大」，建议该服务的
 `search_interval_seconds` 设 600 以上，每次只抓一页。
 
+### 接入 CARPT（标准 NexusPHP）
+
+CARPT 是标准 NexusPHP 模板，内置了模板，但**下载链接不带 passkey**（靠 session），
+必须额外配 `passkey`，否则 qB 下载回来的是登录页：
+
+```yaml
+sites:
+  carpt:
+    type: nexusphp_html
+    base_url: https://carpt.net
+    cookie: "c_secure_uid=...; c_secure_pass=...; ..."
+    passkey: "个人中心 → 密钥（32 位）"
+```
+
+适配器会自动把 `download.php?id=xxx` 补成 `download.php?id=xxx&passkey=xxx`。
+
+内置模板（实测）：
+
+```text
+行           table.torrents > tr
+标题         td:nth-child(2) a[href*='details.php']
+体积         td:nth-child(5)
+做种/下载    td:nth-child(6) / td:nth-child(7)
+发布时间     td:nth-child(4) span[title] 的 title 属性
+下载直链     td:nth-child(2) a[href*='download.php'] 的 href
+促销         img.pro_free / img.pro_free2up / img.pro_2x / ...
+```
+
+注意 `pro_free2up` 是「免费 + 2X 上传」，我们映射为 `_2X_FREE`，不是普通 `FREE`。
+
 ## 新增站点（自定义适配器）
 
 调度、选种、配额、删除这些逻辑与站点无关，新增站点只需要实现一个适配器：

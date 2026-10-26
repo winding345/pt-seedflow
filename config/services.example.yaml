@@ -42,6 +42,13 @@ sites:
   #   # 留空则用内置模板：torrents.php?spstate=2（只看免费）
   #   list_url: torrents.php?spstate=2
   #
+  # CARPT（标准 NexusPHP）：下载链接只认 session，必须额外配 passkey
+  # carpt:
+  #   type: nexusphp_html
+  #   base_url: https://carpt.net
+  #   cookie: "c_secure_uid=...; c_secure_pass=...; ..."
+  #   passkey: "个人中心 → 密钥 里的 32 位字符串"
+  #
   # 另一种：RSS 方式（无促销信息，只适合不挑促销的场景）
   # pttime_rss:
   #   type: nexusphp

@@ -37,8 +37,9 @@ DEFAULT_SELECTORS: Dict[str, str] = {
 
 # 促销标记：命中哪个选择器就是哪种促销
 DEFAULT_DISCOUNT_CASES: Dict[str, str] = {
-    "img.pro_free2up, img.pro_2up, img.pro_free": "FREE",
-    "img.pro_2xfree, img.pro_2x_free": "_2X_FREE",
+    # free2up = 免费 + 2X 上传，语义上是 2X免费，别和单纯免费混了
+    "img.pro_free2up, img.pro_2xfree, img.pro_2x_free": "_2X_FREE",
+    "img.pro_free": "FREE",
     "img.pro_2x, img.pro_2up": "_2X",
     "img.pro_50pct, img.pro_50": "PERCENT_50",
     "img.pro_30pct, img.pro_30": "PERCENT_30",
@@ -66,6 +67,19 @@ SITE_PROFILES: Dict[str, Dict] = {
                 "font.promotion.thirtypercent": "PERCENT_30",
             },
         },
+    },
+}
+
+SITE_PROFILES["carpt.net"] = {
+    "list_url": "torrents.php?spstate=2",
+    "selectors": {
+        "row": "table.torrents > tr, table.torrents > tbody > tr",
+        "title": "td:nth-child(2) a[href*='details.php']",
+        "size": "td:nth-child(5)",
+        "download": "td:nth-child(2) a[href*='download.php']@href",
+        "date": "td:nth-child(4) span[title]@title",
+        "seeders": "td:nth-child(6)",
+        "leechers": "td:nth-child(7)",
     },
 }
 
@@ -115,7 +129,8 @@ def _select(node, selector: str):
 
 def parse_list_html(html_text: str, selectors: Dict[str, str],
                     discount_cases: Dict[str, str], base_url: str,
-                    discount_text_map: Optional[Dict[str, str]] = None) -> List[Candidate]:
+                    discount_text_map: Optional[Dict[str, str]] = None,
+                    passkey: str = "") -> List[Candidate]:
     """把列表页 HTML 解析成候选。选择器缺省时用 NexusPHP 默认值。"""
     merged = dict(DEFAULT_SELECTORS)
     merged.update({k: v for k, v in (selectors or {}).items() if v})
@@ -147,6 +162,10 @@ def parse_list_html(html_text: str, selectors: Dict[str, str],
         download_url = _resolve(row, merged["download"])
         if download_url:
             download_url = urljoin(base_url, download_url)
+            # 有的站点下载链接只认 session，qB 没有 cookie，必须补 passkey
+            if passkey and "passkey=" not in download_url:
+                sep = "&" if "?" in download_url else "?"
+                download_url = "%s%spasskey=%s" % (download_url, sep, passkey)
 
         size = parse_size_text(_resolve(row, merged["size"]))
 
@@ -253,6 +272,7 @@ class NexusPHPHtmlSite(SiteAdapter):
             cases,
             self.cfg.base_url,
             self.cfg.discount_tags,
+            passkey=self.cfg.passkey,
         )
         for candidate in candidates:
             if candidate.url:
