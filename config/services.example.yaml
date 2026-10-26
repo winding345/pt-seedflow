@@ -33,16 +33,20 @@ defaults:
 
 # 站点定义
 sites:
-  # NexusPHP 站点（如 pttime）：用 RSS 接入，不需要 API key / cookie
+  # NexusPHP 站点（如 pttime）：用登录 cookie 抓列表页，能识别促销
   # pttime:
+  #   type: nexusphp_html
+  #   base_url: https://www.pttime.org
+  #   # 浏览器登录后复制 Cookie（只用于本服务，不写进仓库）
+  #   cookie: "c_secure_uid=...; c_secure_pass=...; ..."
+  #   # 留空则用内置模板：torrents.php?spstate=2（只看免费）
+  #   list_url: torrents.php?spstate=2
+  #
+  # 另一种：RSS 方式（无促销信息，只适合不挑促销的场景）
+  # pttime_rss:
   #   type: nexusphp
   #   base_url: https://pttime.org
-  #   # 在站点的「RSS」页面复制带 passkey 的地址
   #   rss_url: https://pttime.org/getrss.php?passkey=你的passkey&showrows=100
-  #   discount_tags:
-  #     2X免费: _2X_FREE
-  #     免费: FREE
-  #     2X: _2X
 
   mteam:
     base_url: https://api.m-team.cc

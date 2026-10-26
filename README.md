@@ -202,38 +202,50 @@ bash deploy.sh    # 只构建启动，不碰 git
 
 ### 接入 pttime（NexusPHP 站点）
 
-用 **RSS** 接入，不需要 API key、不需要 cookie、不消耗任何配额：
+pttime 的 RSS **不含促销信息**，要识别「免费」必须抓网页，所以用 cookie：
 
 ```yaml
 sites:
   pttime:
-    type: nexusphp
-    base_url: https://pttime.org
-    # 站点「RSS」页面里复制的地址，已含 passkey
-    rss_url: https://pttime.org/getrss.php?passkey=你的passkey&showrows=100
-    discount_tags:
-      2X免费: _2X_FREE
-      免费: FREE
-      2X: _2X
+    type: nexusphp_html
+    base_url: https://www.pttime.org
+    cookie: "c_secure_uid=...; c_secure_pass=...; logged_in=...; ..."
 
 services:
   - name: auto-pttime-1
     site: pttime
     category: auto-pttime-1
+    discounts: [FREE, _2X_FREE]     # 只刷免费 / 2X免费
+    size_mb: [5120, 102400]
     dry_run: true
 ```
 
-工作方式：
+内置了 pttime 的页面模板（`torrents.php?spstate=2` 免费页），一般无需写选择器。
+需要的字段：标题、体积、发布时间、做种/下载、下载直链、促销标记，全部自动解析。
 
-1. 拉 RSS，解析 `<item>`：`title` → 名称，`enclosure@url` → 下载直链，`enclosure@length` → 体积
-2. 按 `discount_tags` 在标题/描述里匹配促销关键词
-3. 加种时**直接用 RSS 里的直链**，不再调用任何站点接口
+解析依据（实测）：
 
-局限：
+```text
+行           table#torrenttable > tr
+标题         a.torrentname_title
+体积         td:nth-child(6)
+做种/下载    td:nth-child(7) / td:nth-child(8)
+发布时间     td:nth-child(5) span[title] 的 title 属性
+下载直链     a[href*='download.php'] 的 href
+促销         font.promotion.free / .twoupfree / .halfdown / .twoup / ...
+```
 
-- RSS 只返回站点最新的 N 条（`showrows` 控制），不是按条件搜索
-- 体积与促销依赖 RSS 里的文本，各站格式不同，需要用 `discount_tags` 调
-- 想看实际字段，可以在浏览器打开你的 `rss_url` 看一条 `<item>` 的内容
+自定义选择器可以覆盖模板里的任意字段：
+
+```yaml
+    selectors:
+      size: "td:nth-child(6)"
+      discount_case:
+        "font.promotion.free": FREE
+```
+
+**注意**：pttime 明确提示「高频请求压力大」，建议该服务的
+`search_interval_seconds` 设 600 以上，每次只抓一页。
 
 ## 新增站点（自定义适配器）
 

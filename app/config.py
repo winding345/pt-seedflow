@@ -86,12 +86,18 @@ class SiteConfig:
     rss_url: str = ""
     # 促销关键词 → 统一促销标记，例如 {"免费": "FREE", "2X免费": "_2X_FREE"}
     discount_tags: Dict[str, str] = field(default_factory=dict)
+    # NexusPHP HTML 列表页：登录 cookie 与字段选择器
+    cookie: str = ""
+    list_url: str = ""
+    selectors: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "base_url": self.base_url,
                 "user_agent": self.user_agent, "api_key_file": self.api_key_file,
                 "timeout": self.timeout, "type": self.type,
-                "rss_url": self.rss_url, "discount_tags": dict(self.discount_tags)}
+                "rss_url": self.rss_url, "discount_tags": dict(self.discount_tags),
+                "cookie": self.cookie, "list_url": self.list_url,
+                "selectors": dict(self.selectors)}
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SiteConfig":
@@ -106,6 +112,9 @@ class SiteConfig:
             type=str(data.get("type") or ""),
             rss_url=str(data.get("rss_url") or ""),
             discount_tags={str(k): str(v) for k, v in (data.get("discount_tags") or {}).items()},
+            cookie=str(data.get("cookie") or ""),
+            list_url=str(data.get("list_url") or ""),
+            selectors=dict(data.get("selectors") or {}),
         )
 
     def resolve_key(self) -> str:
@@ -322,11 +331,20 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
             rss_url=str(cfg.get("rss_url") or ""),
             discount_tags={str(k): str(v)
                            for k, v in (cfg.get("discount_tags") or {}).items()},
+            cookie=str(cfg.get("cookie") or ""),
+            list_url=str(cfg.get("list_url") or ""),
+            selectors=dict(cfg.get("selectors") or {}),
         )
         # 提前校验，避免服务跑起来才发现
-        if sites[name].type == "nexusphp" or sites[name].rss_url:
+        kind = sites[name].type or sites[name].name
+        if kind == "nexusphp":
             if not sites[name].rss_url:
                 raise ConfigError("site %s 使用 nexusphp 适配器时必须配置 rss_url" % name)
+        elif kind == "nexusphp_html":
+            if not sites[name].list_url:
+                raise ConfigError("site %s 使用 nexusphp_html 适配器时必须配置 list_url" % name)
+            if not sites[name].cookie:
+                raise ConfigError("site %s 使用 nexusphp_html 适配器时必须配置 cookie" % name)
         else:
             sites[name].resolve_key()
 
