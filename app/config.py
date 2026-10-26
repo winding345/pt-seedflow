@@ -80,11 +80,18 @@ class SiteConfig:
     api_key: str = ""
     api_key_file: str = ""
     timeout: int = 25
+    # 适配器类型；留空则用 name（m-team 这类专属适配器直接按名字注册）
+    type: str = ""
+    # NexusPHP 站点的 RSS 地址，通常已带 passkey
+    rss_url: str = ""
+    # 促销关键词 → 统一促销标记，例如 {"免费": "FREE", "2X免费": "_2X_FREE"}
+    discount_tags: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "base_url": self.base_url,
                 "user_agent": self.user_agent, "api_key_file": self.api_key_file,
-                "timeout": self.timeout}
+                "timeout": self.timeout, "type": self.type,
+                "rss_url": self.rss_url, "discount_tags": dict(self.discount_tags)}
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SiteConfig":
@@ -96,6 +103,9 @@ class SiteConfig:
             api_key=str(data.get("api_key") or ""),
             api_key_file=str(data.get("api_key_file") or ""),
             timeout=int(data.get("timeout", 25)),
+            type=str(data.get("type") or ""),
+            rss_url=str(data.get("rss_url") or ""),
+            discount_tags={str(k): str(v) for k, v in (data.get("discount_tags") or {}).items()},
         )
 
     def resolve_key(self) -> str:
@@ -308,9 +318,17 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
             api_key=str(cfg.get("api_key") or ""),
             api_key_file=str(cfg.get("api_key_file") or ""),
             timeout=int(cfg.get("timeout", 25)),
+            type=str(cfg.get("type") or ""),
+            rss_url=str(cfg.get("rss_url") or ""),
+            discount_tags={str(k): str(v)
+                           for k, v in (cfg.get("discount_tags") or {}).items()},
         )
-        # 提前校验密钥可用，避免服务跑起来才发现
-        sites[name].resolve_key()
+        # 提前校验，避免服务跑起来才发现
+        if sites[name].type == "nexusphp" or sites[name].rss_url:
+            if not sites[name].rss_url:
+                raise ConfigError("site %s 使用 nexusphp 适配器时必须配置 rss_url" % name)
+        else:
+            sites[name].resolve_key()
 
     services_raw = raw.get("services") or []
     if not isinstance(services_raw, list) or not services_raw:

@@ -35,6 +35,8 @@ class Candidate:
     created: Optional[int] = None
     category: Optional[int] = None
     page_url: str = ""
+    # 站点直接给出的下载链接（RSS 场景），有就不必再调接口换 token
+    url: str = ""
 
     @classmethod
     def from_dict(cls, data: dict) -> "Candidate":
@@ -48,6 +50,7 @@ class Candidate:
             leechers=int(data.get("leechers") or 0),
             created=data.get("created"),
             category=data.get("category"),
+            url=str(data.get("url") or ""),
         )
 
     def as_dict(self) -> dict:
@@ -61,6 +64,7 @@ class Candidate:
             "leechers": self.leechers,
             "created": self.created,
             "category": self.category,
+            "url": self.url,
         }
 
 

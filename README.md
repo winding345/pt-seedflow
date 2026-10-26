@@ -199,7 +199,43 @@ bash deploy.sh    # 只构建启动，不碰 git
 `deploy.sh` 刻意不包含任何网络拉取动作，避免网络故障时整条部署流程卡死。
 
 
-## 新增站点（示例：pttime）
+
+### 接入 pttime（NexusPHP 站点）
+
+用 **RSS** 接入，不需要 API key、不需要 cookie、不消耗任何配额：
+
+```yaml
+sites:
+  pttime:
+    type: nexusphp
+    base_url: https://pttime.org
+    # 站点「RSS」页面里复制的地址，已含 passkey
+    rss_url: https://pttime.org/getrss.php?passkey=你的passkey&showrows=100
+    discount_tags:
+      2X免费: _2X_FREE
+      免费: FREE
+      2X: _2X
+
+services:
+  - name: auto-pttime-1
+    site: pttime
+    category: auto-pttime-1
+    dry_run: true
+```
+
+工作方式：
+
+1. 拉 RSS，解析 `<item>`：`title` → 名称，`enclosure@url` → 下载直链，`enclosure@length` → 体积
+2. 按 `discount_tags` 在标题/描述里匹配促销关键词
+3. 加种时**直接用 RSS 里的直链**，不再调用任何站点接口
+
+局限：
+
+- RSS 只返回站点最新的 N 条（`showrows` 控制），不是按条件搜索
+- 体积与促销依赖 RSS 里的文本，各站格式不同，需要用 `discount_tags` 调
+- 想看实际字段，可以在浏览器打开你的 `rss_url` 看一条 `<item>` 的内容
+
+## 新增站点（自定义适配器）
 
 调度、选种、配额、删除这些逻辑与站点无关，新增站点只需要实现一个适配器：
 

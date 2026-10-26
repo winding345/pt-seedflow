@@ -144,6 +144,40 @@ let chartDays = 1;
 let chartBucket = 'hour';
 let chartData = null;
 let hoverIndex = -1;
+let chartVisible = { downloaded: true, uploaded: true };
+let sortColumn = -1;      // -1 表示不排序
+let sortDirection = 'none';   // none → asc → desc → none
+
+// 恢复上次的显隐选择（两条都关掉则忽略）
+try {
+  const saved = JSON.parse(localStorage.getItem('ptsf.chartVisible') || 'null');
+  if (saved && (saved.downloaded || saved.uploaded)) chartVisible = saved;
+} catch (e) {}
+
+function toggleSeries(key) {
+  // 不允许两条都关掉，否则图是空的
+  const next = { ...chartVisible, [key]: !chartVisible[key] };
+  if (!next.downloaded && !next.uploaded) return;
+  chartVisible = next;
+  try { localStorage.setItem('ptsf.chartVisible', JSON.stringify(chartVisible)); } catch (e) {}
+  drawChart();
+  syncLegend();
+}
+
+function syncLegend() {
+  document.querySelectorAll('.legend button[data-series]').forEach(function (btn) {
+    const key = btn.getAttribute('data-series');
+    btn.classList.toggle('on', !!chartVisible[key]);
+    btn.classList.toggle('off', !chartVisible[key]);
+  });
+}
+
+function seriesPoints(point) {
+  const list = [];
+  if (chartVisible.downloaded) list.push([point.downloaded, '#3498db']);
+  if (chartVisible.uploaded) list.push([point.uploaded, '#27ae60']);
+  return list;
+}
 
 function chartHtml() {
   const rangeBtn = d =>
@@ -157,7 +191,12 @@ function chartHtml() {
     + '<div class="filters">' + bucketBtn('hour', '按小时', chartDays > 3)
     + bucketBtn('day', '按天', false) + '</div></div>'
     + '<canvas id="traffic" height="240"></canvas>'
-    + '<div class="legend"><span class="dot dl"></span>下载 <span class="dot ul"></span>上传</div>'
+    + '<div class="legend">'
+    + '<button class="lg ' + (chartVisible.downloaded ? 'on' : 'off') + '" data-series="downloaded">'
+    + '<span class="dot dl"></span>下载</button>'
+    + '<button class="lg ' + (chartVisible.uploaded ? 'on' : 'off') + '" data-series="uploaded">'
+    + '<span class="dot ul"></span>上传</button>'
+    + '</div>'
     + '</div>';
 }
 
@@ -198,7 +237,13 @@ function drawChart() {
     return;
   }
 
-  const maxVal = niceMax(Math.max(...points.map(p => Math.max(p.downloaded, p.uploaded))));
+  const visible = points.map(function (p) {
+    const vals = [];
+    if (chartVisible.downloaded) vals.push(p.downloaded);
+    if (chartVisible.uploaded) vals.push(p.uploaded);
+    return vals.length ? Math.max.apply(null, vals) : 0;
+  });
+  const maxVal = niceMax(Math.max.apply(null, visible.concat([0])));
   const ticks = 4;
   ctx.textAlign = 'right';
   for (let i = 0; i <= ticks; i++) {
@@ -241,13 +286,17 @@ function drawChart() {
     ctx.stroke();
   }
 
-  drawSeries('downloaded', '#3498db', 'rgba(52, 152, 219, 0.12)');
-  drawSeries('uploaded', '#27ae60', 'rgba(39, 174, 96, 0.12)');
+  if (chartVisible.downloaded) {
+    drawSeries('downloaded', '#3498db', 'rgba(52, 152, 219, 0.12)');
+  }
+  if (chartVisible.uploaded) {
+    drawSeries('uploaded', '#27ae60', 'rgba(39, 174, 96, 0.12)');
+  }
 
   // 点：数据点少的时候画出来，多了会糊
   if (points.length <= 48) {
     points.forEach((point, index) => {
-      [[point.downloaded, '#3498db'], [point.uploaded, '#27ae60']].forEach(function (pair) {
+      seriesPoints(point).forEach(function (pair) {
         ctx.beginPath();
         ctx.arc(xAt(index), yAt(pair[0]), 2.5, 0, Math.PI * 2);
         ctx.fillStyle = pair[1];
@@ -268,8 +317,7 @@ function drawChart() {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    [[points[hoverIndex].downloaded, '#3498db'], [points[hoverIndex].uploaded, '#27ae60']]
-      .forEach(function (pair) {
+    seriesPoints(points[hoverIndex]).forEach(function (pair) {
         ctx.beginPath();
         ctx.arc(x, yAt(pair[0]), 4, 0, Math.PI * 2);
         ctx.fillStyle = '#fff';
@@ -330,8 +378,10 @@ function bindChartHover(canvas) {
       ? (moment.getMonth() + 1) + '-' + moment.getDate()
       : String(moment.getHours()).padStart(2, '0') + ':00';
     tip.innerHTML = '<div class="t-time">' + label + '</div>'
-      + '<div><span class="dot dl"></span>下载 ' + bytes(point.downloaded) + '</div>'
-      + '<div><span class="dot ul"></span>上传 ' + bytes(point.uploaded) + '</div>';
+      + (chartVisible.downloaded
+          ? '<div><span class="dot dl"></span>下载 ' + bytes(point.downloaded) + '</div>' : '')
+      + (chartVisible.uploaded
+          ? '<div><span class="dot ul"></span>上传 ' + bytes(point.uploaded) + '</div>' : '');
     tip.style.display = 'block';
 
     const padLeft = 64, padRight = 12;
@@ -364,30 +414,54 @@ async function loadChart(name) {
 
 const COLUMNS = [
   ['状态', row => '<span class="pill ' + (row.state === 'removed' ? 'off' : 'on') + '">'
-      + (row.state === 'removed' ? '已删除' : '运行中') + '</span>', 'left'],
-  ['名称', row => esc(row.name), 'left'],
-  ['预定大小', row => bytes(row.size)],
-  ['已下载', row => bytes(row.downloaded)],
-  ['已上传', row => bytes(row.uploaded)],
-  ['近 1h 上传', row => bytes(row.last_hour_upload)],
-  ['上传/下载比', row => (row.ratio || 0).toFixed(2)],
-  ['已下载比例', row => pct(row.progress)],
-  ['做种', row => row.seeds],
-  ['下载', row => row.leechs],
-  ['下载速度', row => speed(row.dlspeed)],
-  ['上传速度', row => speed(row.upspeed)],
-  ['发布时间', row => ts(row.published_at)],
-  ['添加时间', row => ts(row.added_on)],
-  ['最近活跃', row => ts(row.last_activity)],
-  ['促销结束', row => ts(row.discount_end)],
+      + (row.state === 'removed' ? '已删除' : '运行中') + '</span>', 'left',
+    row => row.state || ''],
+  ['名称', row => esc(row.name), 'left', row => row.name || ''],
+  ['预定大小', row => bytes(row.size), 'right', row => row.size || 0],
+  ['已下载', row => bytes(row.downloaded), 'right', row => row.downloaded || 0],
+  ['已上传', row => bytes(row.uploaded), 'right', row => row.uploaded || 0],
+  ['近 1h 上传', row => bytes(row.last_hour_upload), 'right', row => row.last_hour_upload || 0],
+  ['上传/下载比', row => (row.ratio || 0).toFixed(2), 'right', row => row.ratio || 0],
+  ['已下载比例', row => pct(row.progress), 'right', row => row.progress || 0],
+  ['做种', row => row.seeds, 'right', row => row.seeds || 0],
+  ['下载', row => row.leechs, 'right', row => row.leechs || 0],
+  ['下载速度', row => speed(row.dlspeed), 'right', row => row.dlspeed || 0],
+  ['上传速度', row => speed(row.upspeed), 'right', row => row.upspeed || 0],
+  ['发布时间', row => ts(row.published_at), 'right', row => row.published_at || 0],
+  ['添加时间', row => ts(row.added_on), 'right', row => row.added_on || 0],
+  ['最近活跃', row => ts(row.last_activity), 'right', row => row.last_activity || 0],
+  ['促销结束', row => ts(row.discount_end), 'right', row => row.discount_end || 0],
 ];
+
+function sortRows(rows) {
+  if (sortColumn < 0 || sortDirection === 'none') return rows;
+  const usable = COLUMNS[sortColumn];
+  if (!usable || typeof usable[3] !== 'function') return rows;
+  const factor = sortDirection === 'asc' ? 1 : -1;
+  return rows.slice().sort(function (a, b) {
+    const left = usable[3](a);
+    const right = usable[3](b);
+    if (typeof left === 'number' && typeof right === 'number') {
+      return (left - right) * factor;
+    }
+    return String(left).localeCompare(String(right), 'zh-CN') * factor;
+  });
+}
 
 function tableHtml(rows) {
   if (!rows.length) {
     return '<div class="table-container"><div class="empty">暂无任务</div></div>';
   }
-  const head = COLUMNS.map(c => '<th>' + esc(c[0]) + '</th>').join('');
-  const body = rows.map(row => '<tr>' + COLUMNS.map((c, i) =>
+  const head = COLUMNS.map(function (c, index) {
+    let arrow = '';
+    if (index === sortColumn && sortDirection !== 'none') {
+      arrow = '<span class="arrow">' + (sortDirection === 'asc' ? '↑' : '↓') + '</span>';
+    }
+    const cls = index === sortColumn && sortDirection !== 'none' ? ' class="sorted"' : '';
+    return '<th' + cls + ' data-sort="' + index + '">' + esc(c[0]) + arrow + '</th>';
+  }).join('');
+  const ordered = sortRows(rows);
+  const body = ordered.map(row => '<tr>' + COLUMNS.map((c, i) =>
     '<td' + (i === 1 ? ' class="name" title="' + esc(row.name) + '"' : '') + '>'
     + c[1](row) + '</td>').join('') + '</tr>').join('');
   return '<div class="table-container"><div class="table-wrapper">'
@@ -588,6 +662,29 @@ document.addEventListener('click', function (e) {
   if (actBtn) {
     e.stopPropagation();
     fire(actBtn.getAttribute('data-svc'), actBtn.getAttribute('data-act'));
+    return;
+  }
+  const sortHead = e.target.closest('th[data-sort]');
+  if (sortHead) {
+    const index = Number(sortHead.getAttribute('data-sort'));
+    if (sortColumn !== index) {
+      sortColumn = index;
+      sortDirection = 'asc';
+    } else if (sortDirection === 'asc') {
+      sortDirection = 'desc';
+    } else if (sortDirection === 'desc') {
+      sortDirection = 'none';
+      sortColumn = -1;
+    } else {
+      sortColumn = index;
+      sortDirection = 'asc';
+    }
+    load();
+    return;
+  }
+  const legendBtn = e.target.closest('.legend button[data-series]');
+  if (legendBtn) {
+    toggleSeries(legendBtn.getAttribute('data-series'));
     return;
   }
   const daysBtn = e.target.closest('[data-days]');

@@ -167,7 +167,15 @@ td.name { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-spa
 .chart-head { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; flex-wrap: wrap; }
 .chart-title { font-size: 13px; font-weight: 600; color: #34495e; margin-right: auto; }
 .chart-box canvas { display: block; width: 100%; }
-.legend { display: flex; align-items: center; gap: 16px; font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+.legend { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+.legend button.lg {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; border: 1px solid transparent; border-radius: 6px;
+  padding: 3px 8px; font-size: 12px; color: #2c3e50; cursor: pointer;
+  transition: background .15s, opacity .15s;
+}
+.legend button.lg:hover { background: #f4f7fa; }
+.legend button.lg.off { opacity: .38; text-decoration: line-through; }
 .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 .legend .dot.dl { background: #3498db; }
 .legend .dot.ul { background: #27ae60; }
@@ -204,3 +212,9 @@ textarea {
 .chart-tip .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
 .chart-tip .dot.dl { background: #3498db; }
 .chart-tip .dot.ul { background: #27ae60; }
+
+/* ---------- 表格排序 ---------- */
+thead th[data-sort] { cursor: pointer; user-select: none; }
+thead th[data-sort]:hover { color: #2c3e50; background: #f7f9fb; }
+thead th.sorted { color: #2980b9; }
+thead th .arrow { margin-left: 3px; font-size: 10px; }

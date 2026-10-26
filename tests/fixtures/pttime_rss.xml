@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>PTTime</title>
+    <item>
+      <title>Some.Movie.2026.1080p.WEB-DL.x264-GRP [免费]</title>
+      <link>https://pttime.org/details.php?id=1001</link>
+      <guid>https://pttime.org/details.php?id=1001</guid>
+      <pubDate>Mon, 26 Oct 2026 10:00:00 +0800</pubDate>
+      <description>大小: 4.5 GB 类型: 电影</description>
+      <enclosure url="https://pttime.org/download.php?id=1001&amp;passkey=abc123" length="4831838208" type="application/x-bittorrent"/>
+    </item>
+    <item>
+      <title>Another.Show.S01E02.2160p.WEB-DL.H.265 [2X免费]</title>
+      <link>https://pttime.org/details.php?id=1002</link>
+      <pubDate>Mon, 26 Oct 2026 09:30:00 +0800</pubDate>
+      <description>大小: 1.2 GB</description>
+      <enclosure url="https://pttime.org/download.php?id=1002&amp;passkey=abc123" length="1288490189" type="application/x-bittorrent"/>
+    </item>
+    <item>
+      <title>Normal.Torrent.2026.720p [禁转]</title>
+      <link>https://pttime.org/details.php?id=1003</link>
+      <pubDate>Mon, 26 Oct 2026 09:00:00 +0800</pubDate>
+      <description>大小: 800 MB</description>
+      <enclosure url="https://pttime.org/download.php?id=1003&amp;passkey=abc123" length="838860800" type="application/x-bittorrent"/>
+    </item>
+  </channel>
+</rss>

@@ -425,7 +425,8 @@ class ServiceRunner:
                 self.torrent_count += 1
                 continue
 
-            url = self._genlink(pick.candidate.tid)
+            # RSS 场景站点已直接给出下载链接，省掉一次接口调用
+            url = pick.candidate.url or self._genlink(pick.candidate.tid)
             self.store.quota_add(self.cfg.name, "dl", today())
             if not url:
                 self._log("error", pick.candidate.name, "换取下载链接失败")

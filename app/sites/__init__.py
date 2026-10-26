@@ -27,9 +27,10 @@ def available() -> Dict[str, Type[SiteAdapter]]:
 def create_site(cfg: SiteConfig) -> SiteAdapter:
     """按配置创建适配器；未注册的名称直接报错，避免静默走错站点。"""
     # 触发内置站点的注册
-    from . import mteam  # noqa: F401
+    from . import mteam, nexusphp  # noqa: F401
 
-    cls = _REGISTRY.get(cfg.name)
+    kind = cfg.type or cfg.name
+    cls = _REGISTRY.get(kind)
     if cls is None:
-        raise SiteError("未知站点类型: %s（已注册: %s）" % (cfg.name, ", ".join(sorted(_REGISTRY))))
+        raise SiteError("未知站点类型: %s（已注册: %s）" % (kind, ", ".join(sorted(_REGISTRY))))
     return cls(cfg)
