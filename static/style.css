@@ -218,3 +218,6 @@ thead th[data-sort] { cursor: pointer; user-select: none; }
 thead th[data-sort]:hover { color: #2c3e50; background: #f7f9fb; }
 thead th.sorted { color: #2980b9; }
 thead th .arrow { margin-left: 3px; font-size: 10px; }
+
+.cfg-title { font-size: 13px; color: #34495e; margin: 18px 0 8px; font-weight: 600; }
+textarea + .cfg-title { margin-top: 22px; }

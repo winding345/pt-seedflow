@@ -608,12 +608,32 @@ class Scheduler(threading.Thread):
         self._last_reload = now
         try:
             configs = self.repo.service_configs()
+            sites = self.repo.site_configs()
         except Exception:  # noqa: BLE001  数据库抖动时保持旧配置
             return
+
+        from .sites import create_site
+
         for runner in self.runners:
             incoming = configs.get(runner.cfg.name)
             if incoming is not None:
                 runner.apply_config(incoming)
+
+            # 站点配置（cookie / list_url 等）变化时重建适配器
+            site_cfg = sites.get(runner.cfg.site)
+            if site_cfg is None:
+                continue
+            old = getattr(runner, "_site_signature", None)
+            signature = repr(sorted(site_cfg.to_dict().items(), key=lambda kv: kv[0]))
+            if old == signature:
+                continue
+            try:
+                runner.site = create_site(site_cfg)
+                runner._site_signature = signature
+                if old is not None:
+                    runner._log("config", "站点配置已更新", site_cfg.name)
+            except Exception as exc:  # noqa: BLE001
+                runner._log("error", "站点配置更新失败", str(exc))
 
     def run(self) -> None:
         # 配置重载与业务 tick 各自独立计时：

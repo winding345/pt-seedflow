@@ -515,47 +515,88 @@ function renderDetail(data, rows) {
 
 // ---------- 配置编辑 ----------
 async function renderEditor(name) {
-  let cfg;
+  let service;
+  let site;
+  let siteName = '';
   try {
     const resp = await fetchT('api/services/' + encodeURIComponent(name) + '/config');
-    cfg = await resp.json();
-    if (cfg.error) throw new Error(cfg.error);
+    service = await resp.json();
+    if (service.error) throw new Error(service.error);
+    siteName = service.site || '';
+    if (siteName) {
+      const siteResp = await fetchT('api/sites/' + encodeURIComponent(siteName) + '/config');
+      site = await siteResp.json();
+      if (site.error) site = null;
+    }
   } catch (err) {
     app.innerHTML = '<div class="top"><h1>配置</h1></div>'
       + '<div class="error-box">读取配置失败：' + esc(err) + '</div>';
     return;
   }
+
   app.innerHTML =
     '<div class="detail-top"><a class="back" href="#/service/' + encodeURIComponent(name) + '">← 返回</a>'
     + '<h1>' + esc(name) + ' 配置</h1></div>'
-    + '<div class="hint" style="margin-bottom:10px">保存后立即生效，并写入 MySQL；'
-    + '不校验字段，格式错误会提示。</div>'
-    + '<textarea id="cfgText" spellcheck="false">' + esc(JSON.stringify(cfg, null, 2)) + '</textarea>'
+    + '<div class="hint" style="margin-bottom:10px">保存后立即生效并写入 MySQL；不校验字段，格式错误会提示。</div>'
+    + '<h2 class="cfg-title">服务配置</h2>'
+    + '<textarea id="cfgService" spellcheck="false">' + esc(JSON.stringify(service, null, 2)) + '</textarea>'
+    + (site
+        ? '<h2 class="cfg-title">站点配置 <span class="hint">（' + esc(siteName) + '：cookie / list_url 等）</span></h2>'
+          + '<textarea id="cfgSite" spellcheck="false">' + esc(JSON.stringify(site, null, 2)) + '</textarea>'
+        : '<div class="hint">该站点没有独立配置</div>')
     + '<div class="card-foot"><button id="saveCfg">保存</button>'
     + '<button class="ghost" id="cancelCfg">取消</button></div>';
 
   document.getElementById('saveCfg').addEventListener('click', async function () {
-    let data;
+    let serviceData;
     try {
-      data = JSON.parse(document.getElementById('cfgText').value);
+      serviceData = JSON.parse(document.getElementById('cfgService').value);
     } catch (err) {
-      alert('JSON 解析失败：' + err.message);
+      alert('服务配置 JSON 解析失败：' + err.message);
       return;
     }
+
     try {
       const resp = await fetchT('api/services/' + encodeURIComponent(name) + '/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        body: JSON.stringify(serviceData)
       });
       const result = await resp.json();
       if (result.error) { alert(result.error); return; }
-      alert('已保存并生效');
-      location.hash = '#/service/' + encodeURIComponent(name);
     } catch (err) {
-      alert('保存失败：' + err);
+      alert('服务配置保存失败：' + err);
+      return;
     }
+
+    const siteBox = document.getElementById('cfgSite');
+    if (siteBox && siteName) {
+      let siteData;
+      try {
+        siteData = JSON.parse(siteBox.value);
+      } catch (err) {
+        alert('服务配置已保存；站点配置 JSON 解析失败：' + err.message);
+        return;
+      }
+      try {
+        const resp = await fetchT('api/sites/' + encodeURIComponent(siteName) + '/config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(siteData)
+        });
+        const result = await resp.json();
+        if (result.error) { alert(result.error); return; }
+        if (result.warning) alert(result.warning);
+      } catch (err) {
+        alert('站点配置保存失败：' + err);
+        return;
+      }
+    }
+
+    alert('已保存并生效');
+    location.hash = '#/service/' + encodeURIComponent(name);
   });
+
   document.getElementById('cancelCfg').addEventListener('click', function () {
     location.hash = '#/service/' + encodeURIComponent(name);
   });

@@ -69,6 +69,26 @@ class ConfigRepo:
             result[svc.name] = svc
         return result
 
+    def get_site(self, name: str) -> Optional[SiteConfig]:
+        rows = self.db.query("SELECT config FROM sites WHERE name=%s", (name,))
+        if not rows:
+            return None
+        return SiteConfig.from_dict(json.loads(rows[0][0]))
+
+    def site_configs(self) -> Dict[str, SiteConfig]:
+        rows = self.db.query("SELECT config FROM sites")
+        result: Dict[str, SiteConfig] = {}
+        for (payload,) in rows:
+            site = SiteConfig.from_dict(json.loads(payload))
+            result[site.name] = site
+        return result
+
+    def save_site(self, site: SiteConfig) -> None:
+        self.db.execute(
+            "INSERT INTO sites(name, config, updated_at) VALUES (%s,%s,%s)"
+            " ON DUPLICATE KEY UPDATE config=VALUES(config), updated_at=VALUES(updated_at)",
+            (site.name, json.dumps(site.to_dict(), ensure_ascii=False), int(time.time())))
+
     def service_names(self) -> List[str]:
         return [r[0] for r in self.db.query("SELECT name FROM services ORDER BY name")]
 

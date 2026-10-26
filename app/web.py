@@ -9,7 +9,7 @@ from typing import List
 from fastapi import Body, FastAPI
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from .config import ServiceConfig
+from .config import ServiceConfig, SiteConfig
 from .scheduler import ServiceRunner
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -94,6 +94,39 @@ def create_app(runners: List[ServiceRunner], started_at: float, repo=None) -> Fa
             repo.save_service(service)
         runner.apply_config(service)
         return JSONResponse({"ok": True, "config": service.to_dict()})
+
+    @app.get("/api/sites/{name}/config")
+    def get_site_config(name: str) -> JSONResponse:
+        if repo is None:
+            return JSONResponse({"error": "配置未启用"}, status_code=503)
+        site = repo.get_site(name)
+        if site is None:
+            return JSONResponse({"error": "未知站点: %s" % name}, status_code=404)
+        return JSONResponse(site.to_dict())
+
+    @app.put("/api/sites/{name}/config")
+    def put_site_config(name: str, payload: dict = Body(...)) -> JSONResponse:
+        if repo is None:
+            return JSONResponse({"error": "配置未启用"}, status_code=503)
+        data = dict(payload or {})
+        data["name"] = name
+        try:
+            site = SiteConfig.from_dict(data)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": "站点配置格式错误: %s" % exc}, status_code=400)
+        repo.save_site(site)
+        # 立即生效：重建使用该站点的 runner 的适配器
+        from .sites import create_site
+        for runner in runners:
+            if runner.cfg.site != name:
+                continue
+            try:
+                runner.site = create_site(site)
+                runner._site_signature = repr(sorted(site.to_dict().items(), key=lambda kv: kv[0]))
+                runner._log("config", "站点配置已更新", name)
+            except Exception as exc:  # noqa: BLE001
+                return JSONResponse({"ok": True, "warning": "已保存，但重建适配器失败: %s" % exc})
+        return JSONResponse({"ok": True})
 
     @app.get("/api/services/{name}/traffic")
     def service_traffic(name: str, days: int = 1, bucket: str = "hour") -> JSONResponse:
