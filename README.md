@@ -71,25 +71,31 @@ uv run python -m app.main
 
 ### Docker 部署
 
-**单容器**：MySQL 与应用装在同一个容器里，由一个入口脚本先拉起 MySQL 再启动应用。
+两个容器：应用 + MySQL。
 
 ```bash
 cp .env.example .env      # 改掉里面的密码
 docker compose up -d --build
 ```
 
-容器使用 `network_mode: host`，因此：
+| 服务 | 说明 |
+|---|---|
+| `mysql` | MySQL 8.0，端口 `3366:3306`，局域网可直连，数据在 `./mysql-data` |
+| `app` | pt-seedflow，`network_mode: host`，监听 8600 |
 
-- 应用直接访问 `127.0.0.1:8085` 的 qBittorrent，沿用 qB 的「本机免认证」
-- 内置 MySQL 直接监听宿主机 `3366`，局域网里可以用任意 MySQL 客户端连接
+应用使用 host 网络，是为了让 qBittorrent 的「本机免认证」继续生效
+（bridge 网络下容器来源 IP 会变，被 qB 拒绝 403）。
+因为 host 网络，容器通过 `127.0.0.1:3366` 连 MySQL。
 
 挂载：
 
 | 宿主机 | 容器 | 用途 |
 |---|---|---|
 | `./data` | `/root/.pt-seedflow` | 启动用的 `config.yaml` |
-| `./mysql-data` | `/var/lib/mysql` | MySQL 数据目录（配置 + 统计） |
+| `./mysql-data` | `/var/lib/mysql` | MySQL 数据目录 |
 | `~/.rss` | `/root/.rss:ro` | 站点 API Key（只读） |
+
+MySQL 与应用解耦，其它服务也可以复用这个实例（库名 `ptsf`，端口 3366）。
 
 ### 配置存放在 MySQL
 

@@ -1,4 +1,25 @@
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: pt-seedflow-mysql
+    restart: unless-stopped
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ptsf}
+      MYSQL_USER: ${MYSQL_USER:-ptsf}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      # 宿主机 3366 → 容器 3306：局域网里可直接用客户端连
+      - "3366:3306"
+    volumes:
+      - ./mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   app:
     build:
       context: .
@@ -7,29 +28,26 @@ services:
     image: pt-seedflow:latest
     container_name: pt-seedflow
     # 使用 host 网络：qBittorrent 的"本机免认证"只对 127.0.0.1 生效，
-    # 桥接网络下容器来源 IP 会被拒（403）；容器内的 MySQL 也因此直接监听 3366。
+    # 桥接网络下容器来源 IP 会被拒（403）。
     network_mode: host
-    # 注意：host 网络下 ports 不会被 Docker 使用（会提示 discarded），
-    # 保留是为了让飞牛/fnConnect 能从 compose 声明里识别出可访问的端口。
+    # host 网络下 ports 不生效，保留是为了让飞牛/fnConnect 能识别出可访问端口
     ports:
-      - "8600:8600"      # Web 面板
-      - "3366:3366"      # 容器内 MySQL（仅 MySQL 版需要）
+      - "8600:8600"
     restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
     environment:
       - TZ=Asia/Shanghai
-      # 容器内 MySQL（与应用同容器）
       - PT_DB_HOST=127.0.0.1
       - PT_DB_PORT=3366
       - PT_DB_NAME=${MYSQL_DATABASE:-ptsf}
       - PT_DB_USER=${MYSQL_USER:-ptsf}
-      - PT_DB_PASSWORD=${MYSQL_PASSWORD:-ptsf_change_me}
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-ptsf_root_change_me}
+      - PT_DB_PASSWORD=${MYSQL_PASSWORD}
       # 设为 1 时，启动用 config.yaml 覆盖数据库配置
       - PT_CFG_FORCE=${PT_CFG_FORCE:-0}
     volumes:
       # 启动用的配置文件（配置与统计都在 MySQL）
       - ./data:/root/.pt-seedflow
-      # MySQL 数据目录，容器重建不丢
-      - ./mysql-data:/var/lib/mysql
       # 站点 api key，只读挂载，路径与示例配置保持一致
       - ${HOME}/.rss:/root/.rss:ro
