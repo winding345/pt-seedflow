@@ -240,8 +240,6 @@ class NexusPHPHtmlSite(SiteAdapter):
         cfg.selectors = selectors
         if not cfg.list_url:
             cfg.list_url = profile.get("list_url") or ""
-        if not cfg.cookie:
-            raise SiteError("站点 %s 缺少 cookie" % cfg.name)
         if not cfg.list_url:
             raise SiteError("站点 %s 缺少 list_url（该站点没有内置模板）" % cfg.name)
         self.cfg = cfg
@@ -254,6 +252,8 @@ class NexusPHPHtmlSite(SiteAdapter):
             "Cookie": self.cfg.cookie,
             "Accept": "text/html,application/xhtml+xml",
         }
+        if not self.cfg.cookie:
+            raise SiteError("站点 %s 未配置 cookie，请在面板「编辑配置 → 站点配置」里填写" % self.cfg.name)
         request = Request(url, headers=headers)
         try:
             with urlopen(request, timeout=self.cfg.timeout) as resp:

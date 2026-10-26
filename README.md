@@ -106,8 +106,13 @@ MySQL 与应用解耦，其它服务也可以复用这个实例（库名 `ptsf`�
 | 第一次启动（库里没有服务配置） | 用 `data/config.yaml` 初始化数据库 |
 | 之后启动 | **以数据库为准**，配置文件只用于首次初始化 |
 | 带 `--cfg_force` 或 `PT_CFG_FORCE=1` | 用 `data/config.yaml` **覆盖**数据库 |
+| 数据库里缺某个服务 | 从 `data/config.yaml` 或内置的 `config/services.seed.yaml` 补齐 |
 
 `bash force-config.sh` 就是「覆盖」那条路径。
+
+**新增站点不用手改配置文件**：`config/services.seed.yaml` 随代码发布，
+启动时把数据库里没有的服务/站点补进去，已有的一律不覆盖。
+更新代码重启后，面板上会直接多出新卡片，点进去填 cookie / passkey / 配额即可。
 
 运行中每 5 分钟（`PT_CFG_RELOAD_SECONDS` 可调）从数据库重读一次服务配置，
 改完立即生效，不用重启：

@@ -35,9 +35,11 @@ def test_site_search_and_genlink(monkeypatch):
     assert site.genlink(rows[0].tid) == rows[0].url
 
 
-def test_missing_cookie_rejected():
+def test_missing_cookie_reported_on_fetch():
+    """cookie 允许先空着（面板可补），真正抓取时才报错。"""
     from app.sites.base import SiteError
     cfg = SiteConfig(name="demo", base_url="https://x", user_agent="ua",
                      type="nexusphp_html", list_url="torrents.php")
+    site = NexusPHPHtmlSite(cfg)          # 构造不再报错
     with pytest.raises(SiteError):
-        NexusPHPHtmlSite(cfg)
+        site.search()

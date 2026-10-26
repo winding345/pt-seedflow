@@ -1,0 +1,43 @@
+# 随代码发布的「服务种子」：启动时若数据库里没有对应服务/站点，就自动补进去。
+# 已存在的服务一律以数据库为准，不会被这里覆盖。
+#
+# 用途：新增站点时你只需更新代码，面板上就会多出卡片，再点进去填凭据即可。
+
+sites:
+  pttime:
+    type: nexusphp_html
+    base_url: https://www.pttime.org
+    # cookie 留空：先在面板里补，补完热加载生效
+    cookie: ""
+
+  carpt:
+    type: nexusphp_html
+    base_url: https://carpt.net
+    cookie: ""
+    passkey: ""
+
+services:
+  - name: auto-pttime-1
+    site: pttime
+    category: auto-pttime-1
+    disk_gb: 50
+    discounts: [FREE, _2X_FREE]
+    size_mb: [5120, 102400]
+    max_torrents: 30
+    add_per_tick: 5
+    search_interval_seconds: 1800
+    refill_min_seconds: 900
+    dry_run: true
+
+  - name: auto-carpt-1
+    site: carpt
+    category: auto-carpt-1
+    # 暂不分配空间：0 表示永远不加种，但服务仍然可见可配置
+    disk_gb: 0
+    discounts: [FREE, _2X_FREE]
+    size_mb: [5120, 102400]
+    max_torrents: 30
+    add_per_tick: 5
+    search_interval_seconds: 1800
+    refill_min_seconds: 900
+    dry_run: true

@@ -83,3 +83,33 @@ def test_mysql_store_matches_sqlite_api():
     sqlite_api = {n for n in dir(Store) if not n.startswith("_")}
     mysql_api = {n for n in dir(MySQLStore) if not n.startswith("_")}
     assert sqlite_api - mysql_api == set(), "MySQLStore 缺少: %s" % sorted(sqlite_api - mysql_api)
+
+
+def test_merge_missing_only_adds_new(db):
+    from app.config import AppConfig, DownloaderConfig, ServiceConfig, SiteConfig
+    from app.confrepo import ConfigRepo
+
+    repo = ConfigRepo(db)
+    repo.save_service(ServiceConfig(name="auto-mteam-1", site="mteam", disk_gb=100))
+    repo.save_site(SiteConfig(name="mteam", base_url="https://api.m-team.cc", user_agent="ua"))
+
+    cfg = AppConfig(
+        host="0.0.0.0", port=8600, tick_seconds=300, refresh_every_ticks=12,
+        sites={
+            "mteam": SiteConfig(name="mteam", base_url="https://api.m-team.cc", user_agent="ua"),
+            "pttime": SiteConfig(name="pttime", base_url="https://www.pttime.org",
+                                 user_agent="ua", type="nexusphp_html",
+                                 list_url="torrents.php?spstate=2"),
+        },
+        services=[
+            ServiceConfig(name="auto-mteam-1", site="mteam", disk_gb=999),   # 已存在，不应覆盖
+            ServiceConfig(name="auto-pttime-1", site="pttime", disk_gb=50),
+        ],
+        downloader=DownloaderConfig(),
+    )
+    added = repo.merge_missing(cfg)
+    assert added["services"] == ["auto-pttime-1"]
+    assert added["sites"] == ["pttime"]
+    # 老服务保持数据库里的值，不被配置文件覆盖
+    assert repo.get_service("auto-mteam-1").disk_gb == 100
+    assert repo.get_service("auto-pttime-1").disk_gb == 50

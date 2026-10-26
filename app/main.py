@@ -9,7 +9,7 @@ import time
 import uvicorn
 
 from . import bootstrap
-from .config import ConfigError, load_config
+from .config import ConfigError, load_config, load_seed
 from .confrepo import ConfigRepo
 from .db import Database, MySQLStore
 from .qb import QBittorrent
@@ -57,10 +57,25 @@ def main(argv=None) -> int:
 
     repo = ConfigRepo(db)
     force = args.cfg_force or os.environ.get("PT_CFG_FORCE") == "1"
-    if force or repo.is_empty():
+    if force:
         repo.save_all(file_config)
-        print("[config] 已用 config.yaml %s数据库配置"
-              % ("覆盖" if force else "初始化"), flush=True)
+        print("[config] 已用 config.yaml 覆盖数据库配置", flush=True)
+    elif repo.is_empty():
+        repo.save_all(file_config)
+        print("[config] 数据库为空，已用 config.yaml 初始化", flush=True)
+    else:
+        added = repo.merge_missing(file_config)
+        seed_services, seed_sites = load_seed()
+        seeded = repo.merge_parts(seed_services, seed_sites)
+        merged = {
+            "services": added["services"] + seeded["services"],
+            "sites": added["sites"] + seeded["sites"],
+        }
+        if merged["services"] or merged["sites"]:
+            print("[config] 已补充缺失项：服务=%s 站点=%s"
+                  % (merged["services"] or "无", merged["sites"] or "无"), flush=True)
+        else:
+            print("[config] 使用数据库配置（无新增项）", flush=True)
 
     try:
         config = repo.load()

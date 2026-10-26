@@ -295,6 +295,37 @@ def _require(mapping: Dict[str, Any], key: str, where: str) -> Any:
     return mapping[key]
 
 
+def seed_file() -> Path:
+    """随镜像发布的种子配置（新增服务用）。"""
+    return Path(__file__).resolve().parent.parent / "config" / "services.seed.yaml"
+
+
+def load_seed(path: Optional[Path] = None):
+    """加载种子配置，返回 (services, sites)。
+
+    与 load_config 不同：不做密钥存在性校验，cookie 允许为空——这些都在面板里补。
+    """
+    import yaml
+
+    target = Path(path) if path else seed_file()
+    if not target.is_file():
+        return [], {}
+    raw = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+
+    sites: Dict[str, SiteConfig] = {}
+    for name, cfg in (raw.get("sites") or {}).items():
+        cfg = dict(cfg or {})
+        cfg.setdefault("name", name)
+        cfg.setdefault("base_url", "https://%s" % name)
+        cfg.setdefault("user_agent", "Mozilla/5.0")
+        sites[name] = SiteConfig.from_dict(cfg)
+
+    services: List[ServiceConfig] = []
+    for item in raw.get("services") or []:
+        services.append(ServiceConfig.from_dict(dict(item)))
+    return services, sites
+
+
 def load_config(path: Optional[Path] = None) -> AppConfig:
     """读取并校验配置；任何不合法都抛 ConfigError。"""
     target = Path(path) if path else CONFIG_FILE
@@ -355,8 +386,7 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
         elif kind == "nexusphp_html":
             if not sites[name].list_url:
                 raise ConfigError("site %s 使用 nexusphp_html 适配器时必须配置 list_url" % name)
-            if not sites[name].cookie:
-                raise ConfigError("site %s 使用 nexusphp_html 适配器时必须配置 cookie" % name)
+            # cookie 允许先留空：启动后可在面板补充，届时热加载生效
         else:
             sites[name].resolve_key()
 

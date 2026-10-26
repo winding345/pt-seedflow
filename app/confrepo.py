@@ -118,6 +118,56 @@ class ConfigRepo:
         })
         self._set_meta("downloader", cfg.downloader.to_dict())
 
+    def merge_parts(self, services: List[ServiceConfig],
+                    sites: Dict[str, SiteConfig]) -> Dict[str, List[str]]:
+        """按名字补充缺失的服务/站点，同名的一律跳过。"""
+        has_services = set(self.service_names())
+        has_sites = set(self.site_configs().keys())
+        added_services: List[str] = []
+        added_sites: List[str] = []
+
+        for name, site in sites.items():
+            if name not in has_sites:
+                self.save_site(site)
+                added_sites.append(name)
+        for service in services:
+            if service.name not in has_services:
+                self.save_service(service)
+                added_services.append(service.name)
+        return {"services": added_services, "sites": added_sites}
+
+    def merge_missing(self, cfg: AppConfig) -> Dict[str, List[str]]:
+        """把数据库里不存在的服务/站点补进去，已有的一律不动。
+
+        这样：老服务继续以数据库为准，新增服务从配置文件引导一次，
+        之后统一在面板里改。
+        """
+        has_services = set(self.service_names())
+        has_sites = set(self.site_configs().keys())
+        added_services: List[str] = []
+        added_sites: List[str] = []
+
+        for site in cfg.sites.values():
+            if site.name not in has_sites:
+                self.save_site(site)
+                added_sites.append(site.name)
+        for service in cfg.services:
+            if service.name not in has_services:
+                self.save_service(service)
+                added_services.append(service.name)
+
+        meta = {k: v for k, v in self.db.query("SELECT k, v FROM meta")}
+        if "server" not in meta:
+            self._set_meta("server", {
+                "host": cfg.host, "port": cfg.port,
+                "tick_seconds": cfg.tick_seconds,
+                "refresh_every_ticks": cfg.refresh_every_ticks,
+            })
+        if "downloader" not in meta:
+            self._set_meta("downloader", cfg.downloader.to_dict())
+
+        return {"services": added_services, "sites": added_sites}
+
     def save_service(self, service: ServiceConfig) -> None:
         self.db.execute(
             "INSERT INTO services(name, config, updated_at) VALUES (%s,%s,%s)"
