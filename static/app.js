@@ -143,7 +143,7 @@ function renderList(data) {
 let chartDays = 1;
 let chartBucket = 'hour';
 let chartData = null;
-let chartBars = [];
+let hoverIndex = -1;
 
 function chartHtml() {
   const rangeBtn = d =>
@@ -190,10 +190,9 @@ function drawChart() {
   const plotH = cssHeight - padTop - padBottom;
 
   ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
-  ctx.strokeStyle = '#e9ecef';
-  ctx.fillStyle = '#7f8c8d';
 
   if (!points.length) {
+    ctx.fillStyle = '#7f8c8d';
     ctx.textAlign = 'center';
     ctx.fillText('暂无流量数据（服务刚上线或还没有采样）', cssWidth / 2, cssHeight / 2);
     return;
@@ -205,46 +204,94 @@ function drawChart() {
   for (let i = 0; i <= ticks; i++) {
     const y = padTop + plotH - (plotH * i) / ticks;
     const value = (maxVal * i) / ticks;
+    ctx.strokeStyle = '#eef1f4';
     ctx.beginPath();
     ctx.moveTo(padLeft, y);
     ctx.lineTo(padLeft + plotW, y);
     ctx.stroke();
+    ctx.fillStyle = '#7f8c8d';
     ctx.fillText(bytes(value), padLeft - 8, y + 4);
   }
 
   const slot = plotW / points.length;
-  const barW = Math.max(2, Math.min(18, slot / 2.6));
-  chartBars = [];
-  const d = new Date();
+  const xAt = i => padLeft + slot * (i + 0.5);
+  const yAt = v => padTop + plotH - (v / maxVal) * plotH;
 
-  points.forEach((point, index) => {
-    const cx = padLeft + slot * (index + 0.5);
-    const hDl = (point.downloaded / maxVal) * plotH;
-    const hUl = (point.uploaded / maxVal) * plotH;
-    ctx.fillStyle = '#3498db';
-    ctx.fillRect(cx - barW - 1, padTop + plotH - hDl, barW, hDl);
-    ctx.fillStyle = '#27ae60';
-    ctx.fillRect(cx + 1, padTop + plotH - hUl, barW, hUl);
+  function drawSeries(key, color, fill) {
+    // 面积
+    ctx.beginPath();
+    ctx.moveTo(xAt(0), padTop + plotH);
+    points.forEach((point, index) => ctx.lineTo(xAt(index), yAt(point[key])));
+    ctx.lineTo(xAt(points.length - 1), padTop + plotH);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
 
-    // 悬浮命中的是"整列"，柱子太矮也能看到数值
-    chartBars.push({
-      x: cx - barW - 2,
-      w: barW * 2 + 4,
-      top: padTop,
-      bottom: padTop + plotH,
-      point: point,
+    // 折线
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      const x = xAt(index);
+      const y = yAt(point[key]);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
     });
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
 
-    const every = Math.ceil(points.length / 8);
-    if (index % every === 0) {
-      d.setTime(point.ts * 1000);
-      const label = chartBucket === 'day'
-        ? (d.getMonth() + 1) + '-' + d.getDate()
-        : String(d.getHours()).padStart(2, '0') + ':00';
-      ctx.fillStyle = '#7f8c8d';
-      ctx.textAlign = 'center';
-      ctx.fillText(label, cx, cssHeight - 12);
-    }
+  drawSeries('downloaded', '#3498db', 'rgba(52, 152, 219, 0.12)');
+  drawSeries('uploaded', '#27ae60', 'rgba(39, 174, 96, 0.12)');
+
+  // 点：数据点少的时候画出来，多了会糊
+  if (points.length <= 48) {
+    points.forEach((point, index) => {
+      [[point.downloaded, '#3498db'], [point.uploaded, '#27ae60']].forEach(function (pair) {
+        ctx.beginPath();
+        ctx.arc(xAt(index), yAt(pair[0]), 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = pair[1];
+        ctx.fill();
+      });
+    });
+  }
+
+  // 悬浮指示：竖线 + 高亮两个点
+  if (hoverIndex >= 0 && hoverIndex < points.length) {
+    const x = xAt(hoverIndex);
+    ctx.strokeStyle = 'rgba(44, 62, 80, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(x, padTop);
+    ctx.lineTo(x, padTop + plotH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    [[points[hoverIndex].downloaded, '#3498db'], [points[hoverIndex].uploaded, '#27ae60']]
+      .forEach(function (pair) {
+        ctx.beginPath();
+        ctx.arc(x, yAt(pair[0]), 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = pair[1];
+        ctx.stroke();
+      });
+  }
+
+  // 横轴标签
+  const every = Math.ceil(points.length / 8);
+  const d = new Date();
+  ctx.textAlign = 'center';
+  points.forEach((point, index) => {
+    if (index % every !== 0) return;
+    d.setTime(point.ts * 1000);
+    const label = chartBucket === 'day'
+      ? (d.getMonth() + 1) + '-' + d.getDate()
+      : String(d.getHours()).padStart(2, '0') + ':00';
+    ctx.fillStyle = '#7f8c8d';
+    ctx.fillText(label, xAt(index), cssHeight - 12);
   });
 
   bindChartHover(canvas);
@@ -258,27 +305,38 @@ function bindChartHover(canvas) {
   tip.className = 'chart-tip';
   canvas.parentElement.appendChild(tip);
 
+  function indexFromX(x) {
+    const points = (chartData && chartData.points) || [];
+    if (!points.length) return -1;
+    const padLeft = 64, padRight = 12;
+    const plotW = Math.max(10, canvas.clientWidth - padLeft - padRight);
+    const slot = plotW / points.length;
+    const index = Math.round((x - padLeft) / slot - 0.5);
+    return Math.max(0, Math.min(points.length - 1, index));
+  }
+
   canvas.addEventListener('mousemove', function (event) {
-    const x = event.offsetX;
-    const hit = chartBars.find(function (bar) {
-      return x >= bar.x && x <= bar.x + bar.w;
-    });
-    if (!hit) {
-      tip.style.display = 'none';
-      canvas.style.cursor = 'default';
-      return;
+    const points = (chartData && chartData.points) || [];
+    if (!points.length) return;
+    const index = indexFromX(event.offsetX);
+    if (index !== hoverIndex) {
+      hoverIndex = index;
+      drawChart();
     }
-    const moment = new Date(hit.point.ts * 1000);
+
+    const point = points[index];
+    const moment = new Date(point.ts * 1000);
     const label = chartBucket === 'day'
       ? (moment.getMonth() + 1) + '-' + moment.getDate()
       : String(moment.getHours()).padStart(2, '0') + ':00';
     tip.innerHTML = '<div class="t-time">' + label + '</div>'
-      + '<div><span class="dot dl"></span>下载 ' + bytes(hit.point.downloaded) + '</div>'
-      + '<div><span class="dot ul"></span>上传 ' + bytes(hit.point.uploaded) + '</div>';
+      + '<div><span class="dot dl"></span>下载 ' + bytes(point.downloaded) + '</div>'
+      + '<div><span class="dot ul"></span>上传 ' + bytes(point.uploaded) + '</div>';
     tip.style.display = 'block';
-    canvas.style.cursor = 'pointer';
 
-    // 靠近右边界时提示框向左翻转，避免被裁掉
+    const padLeft = 64, padRight = 12;
+    const plotW = Math.max(10, canvas.clientWidth - padLeft - padRight);
+    const x = padLeft + (plotW / points.length) * (index + 0.5);
     const boxWidth = canvas.parentElement.clientWidth;
     const tipWidth = 150;
     const left = canvas.offsetLeft + x + 14;
@@ -287,8 +345,9 @@ function bindChartHover(canvas) {
   });
 
   canvas.addEventListener('mouseleave', function () {
+    hoverIndex = -1;
     tip.style.display = 'none';
-    canvas.style.cursor = 'default';
+    drawChart();
   });
 }
 
