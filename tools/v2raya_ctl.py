@@ -96,6 +96,47 @@ def endpoints() -> None:
         print(path)
 
 
+def _mask(url: str) -> str:
+    import re
+    return re.sub(r'([?&](?:token|passkey|key)=)[^&]+', r'\1***', url)
+
+
+def subtest() -> None:
+    """检查订阅是否支持 Clash 格式（mihomo 需要）。"""
+    import base64
+    res = call("/api/touch")
+    subs = ((res.get("data") or {}).get("touch") or {}).get("subscriptions") or []
+    if not subs:
+        print("没有找到订阅")
+        return
+    for sub in subs:
+        url = sub.get("address") or ""
+        print("订阅地址:", _mask(url))
+        print("  主机:", sub.get("host"), "| 类型:", sub.get("_type"))
+        variants = [url]
+        sep = "&" if "?" in url else "?"
+        variants += [url + sep + "flag=clash", url + sep + "flag=clash&udp=true"]
+        for v in variants:
+            try:
+                req = urllib.request.Request(v, headers={"User-Agent": "clash-verge/v1.7.0"})
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    raw = resp.read()
+                text = raw.decode("utf-8", "replace")
+                head = text[:120].replace("\n", " ")
+                kind = "clash-yaml" if "proxies:" in text[:4000] else "other"
+                if kind == "other":
+                    try:
+                        decoded = base64.b64decode(text.strip() + "===").decode("utf-8", "replace")
+                        if "://" in decoded[:200]:
+                            kind = "v2ray-base64"
+                    except Exception:  # noqa: BLE001
+                        pass
+                print("  %-42s %6d字节  %s" % (v[len(url):] or "(原始)", len(raw), kind))
+                print("     开头:", head[:100])
+            except Exception as exc:  # noqa: BLE001
+                print("  %-42s 失败: %s" % (v[len(url):] or "(原始)", str(exc)[:60]))
+
+
 def status() -> None:
     for path in ("/api/setting", "/api/touch", "/api/v2ray", "/api/server"):
         res = call(path)
@@ -139,6 +180,12 @@ def main(argv: list[str]) -> int:
     action = argv[0] if argv else "status"
     if action == "endpoints":
         endpoints()
+        return 0
+
+    if action == "subtest":
+        if not login():
+            return 1
+        subtest()
         return 0
 
     if action == "probe":
