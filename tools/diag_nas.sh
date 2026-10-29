@@ -10,6 +10,40 @@ API=http://127.0.0.1:8600
 PW=$(grep '^MYSQL_PASSWORD=' .env 2>/dev/null | cut -d= -f2)
 MYSQL="docker exec pt-seedflow-mysql mysql -uptsf -p${PW} -N"
 
+echo "=== 0. TLS 诊断（容器内 Python vs 宿主机）==="
+echo "-- 容器环境代理 --"
+docker exec pt-seedflow env 2>/dev/null | grep -i proxy || echo "(无 proxy 变量)"
+echo "-- 容器时间 --"
+docker exec pt-seedflow date 2>/dev/null
+echo "-- 宿主机解析 --"
+getent hosts api.m-team.cc | head -3
+echo "-- 宿主机证书签发者 --"
+openssl s_client -connect api.m-team.cc:443 -servername api.m-team.cc </dev/null 2>/dev/null \
+  | openssl x509 -noout -issuer -subject -dates 2>/dev/null || echo "(openssl 不可用)"
+echo "-- 容器内 Python 直连 --"
+docker exec pt-seedflow python -c "
+import urllib.request, ssl
+for desc, ctx in (('verify', ssl.create_default_context()), ('noverify', ssl._create_unverified_context())):
+    try:
+        r = urllib.request.urlopen('https://api.m-team.cc/', timeout=10, context=ctx)
+        print(desc, 'ok', r.status)
+    except Exception as e:
+        print(desc, 'fail', type(e).__name__, str(e)[:90])
+" 2>&1 | head -6
+echo "-- 容器内证书链 --"
+docker exec pt-seedflow python -c "
+import ssl, socket
+ctx = ssl.create_default_context()
+try:
+    with socket.create_connection(('api.m-team.cc', 443), timeout=10) as sock:
+        with ctx.wrap_socket(sock, server_hostname='api.m-team.cc') as ss:
+            print('peer cert subject:', dict(x[0] for x in ss.getpeercert()['subject']))
+            print('issuer:', dict(x[0] for x in ss.getpeercert()['issuer']))
+except Exception as e:
+    print('chain fail:', type(e).__name__, str(e)[:120])
+" 2>&1 | head -4
+
+echo
 echo "=== 1. TLS 可达性（从 NAS 测 m-team）==="
 curl -sS -o /dev/null -m 15 -w 'https://api.m-team.cc -> %{http_code}\n' \
      https://api.m-team.cc/ 2>&1 | head -2
