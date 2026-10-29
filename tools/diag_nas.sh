@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# NAS 侧一次性诊断脚本（只读，不改任何状态）
+# 用法：bash tools/diag_nas.sh [service_name]
+set -uo pipefail
+cd "$(dirname "$0")/.." || exit 1
+
+SVC="${1:-auto-mteam-1}"
+API=http://127.0.0.1:8600
+
+PW=$(grep '^MYSQL_PASSWORD=' .env 2>/dev/null | cut -d= -f2)
+MYSQL="docker exec pt-seedflow-mysql mysql -uptsf -p${PW} -N"
+
+echo "=== 1. TLS 可达性（从 NAS 测 m-team）==="
+curl -sS -o /dev/null -m 15 -w 'https://api.m-team.cc -> %{http_code}\n' \
+     https://api.m-team.cc/ 2>&1 | head -2
+
+echo
+echo "=== 2. 服务概览 ==="
+curl -s "$API/api/status" > /tmp/ptsf_status.json
+python3 - "$SVC" <<'PY'
+import json, sys
+svc = sys.argv[1]
+d = json.load(open('/tmp/ptsf_status.json'))
+for s in d['services']:
+    c, st = s['config'], s['stats']
+    mark = '*' if s['name'] == svc else ' '
+    print("%s %-14s en=%-5s dry=%-5s disk=%-5s used=%-6s trr=%-3s cand=%-4s dl=%s/%s srch=%s/%s itv=%s refill=%s/%s" % (
+        mark, s['name'], c.get('enabled'), c.get('dry_run'), c.get('disk_gb'),
+        st['used_gb'], st['torrents'], st['candidates'], st['dl_used'], st['dl_cap'],
+        st['search_used'], st['search_cap'], c.get('search_interval_seconds'),
+        c.get('refill_when_empty'), c.get('refill_min_seconds')))
+PY
+
+echo
+echo "=== 3. 去重集合大小 ==="
+$MYSQL -e "
+select 'added_7d', count(distinct tid) from ptsf.added_history where service='$SVC' and ts > unix_timestamp()-7*86400;
+select 'removed_24h', count(distinct tid) from ptsf.removal_history where service='$SVC' and ts > unix_timestamp()-86400;
+" 2>/dev/null
+
+echo
+echo "=== 4. 候选池构成（解析缓存）==="
+$MYSQL -e "select payload from ptsf.candidate_cache where service='$SVC';" 2>/dev/null > /tmp/ptsf_cand.json
+$MYSQL -e "
+select tid from ptsf.added_history where service='$SVC' and ts > unix_timestamp()-7*86400
+union
+select tid from ptsf.removal_history where service='$SVC' and ts > unix_timestamp()-86400;
+" 2>/dev/null > /tmp/ptsf_excl.txt
+
+python3 - <<'PY'
+import json, collections
+try:
+    cands = json.load(open('/tmp/ptsf_cand.json'))
+except Exception as exc:
+    print("候选缓存不可解析:", exc)
+    raise SystemExit
+cands = [c for c in cands if isinstance(c, dict)]
+excl = {l.strip() for l in open('/tmp/ptsf_excl.txt') if l.strip()}
+print("候选总数      :", len(cands))
+print("去重集合大小  :", len(excl))
+print("促销分布      :", dict(collections.Counter(c.get('discount') for c in cands)))
+free = [c for c in cands if c.get('discount') in ('FREE', '_2X_FREE')]
+print("免费类        :", len(free))
+sized = [c for c in free if 5 * 1024**3 <= int(c.get('size') or 0) <= 100 * 1024**3]
+print("免费且体积合格:", len(sized))
+left = [c for c in sized if str(c.get('tid')) not in excl]
+print("再排除已加/已删:", len(left))
+if left:
+    for c in left[:5]:
+        print("   可加:", c.get('name', '')[:40], "| %0.2fGB" % (int(c.get('size') or 0) / 1024**3))
+PY
+
+echo
+echo "=== 5. 最近动作（$SVC）==="
+curl -s "$API/api/status" | python3 -c "
+import json, sys
+for s in json.load(sys.stdin)['services']:
+    if s['name'] == '$SVC':
+        for a in s['actions'][:10]:
+            print(a['time'], a['kind'].ljust(8), a['name'][:26], '|', a['detail'][:50])
+"
