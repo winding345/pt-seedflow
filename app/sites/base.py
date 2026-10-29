@@ -47,6 +47,7 @@ class HTTPClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.proxy = proxy
+        self.last_error = ""
 
     def _open(self, request: Request):
         """有代理就带代理请求（DNS 由代理解析，可绕开本地投毒）。"""
@@ -75,7 +76,18 @@ class HTTPClient:
         except HTTPError as exc:
             raise SiteError("%s 返回 HTTP %s" % (path, exc.code))
         except URLError as exc:
-            raise SiteError("%s 连接失败: %s" % (path, exc.reason))
+            # 代理挂了就回落直连一次：机场不稳定时别让整个站点停摆
+            if self.proxy:
+                try:
+                    direct = Request(url, data=payload, headers=headers or {}, method=method)
+                    with urlopen(direct, timeout=self.timeout) as resp:
+                        raw = resp.read()
+                    self.last_error = "代理不可用，已回落直连"
+                except Exception as exc2:  # noqa: BLE001
+                    raise SiteError("%s 代理失败(%s)且直连失败(%s)"
+                                    % (path, exc.reason, exc2))
+            else:
+                raise SiteError("%s 连接失败: %s" % (path, exc.reason))
 
         if not expect_json:
             return raw
