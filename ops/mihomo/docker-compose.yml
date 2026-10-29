@@ -1,0 +1,29 @@
+services:
+  mihomo:
+    image: metacubex/mihomo:latest
+    container_name: mihomo
+    restart: unless-stopped
+    # host 网络：代理端口直接开在 NAS 本机，容器里的服务也能用 127.0.0.1 访问
+    network_mode: host
+    volumes:
+      - ./config.yaml:/root/.config/mihomo/config.yaml:ro
+      # 订阅缓存需要可写
+      - ./providers:/root/.config/mihomo/providers
+    cap_add:
+      # 只在以后想开 tun 时才需要；现在不启用 tun，留着无副作用
+      - NET_ADMIN
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
+  # 可选：Web 界面（看节点延迟/切换节点）
+  # 启动后访问 http://<nas>:9091
+  ui:
+    image: ghcr.io/metacubex/metacubexd:latest
+    container_name: mihomo-ui
+    restart: unless-stopped
+    ports:
+      - "9091:80"
+    depends_on:
+      - mihomo

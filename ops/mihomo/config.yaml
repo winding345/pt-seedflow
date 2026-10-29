@@ -1,0 +1,78 @@
+# mihomo 配置：只给需要翻墙的东西用，PT 全部直连
+#
+# 设计原则：
+# 1. 不开 tun / 透明代理 —— qB 的 BT 流量永远不会经过这里
+# 2. 只监听 127.0.0.1:7890 —— 局域网其它设备用不到，安全
+# 3. PT 站（含 tracker/announce）显式直连，防盒子判定
+# 4. 只有 api.m-team.cc 走代理（pt-seedflow 需要）
+# 5. DNS 用 DoH，绕开本地 DNS 投毒
+
+mixed-port: 7890
+bind-address: 127.0.0.1
+allow-lan: false
+mode: rule
+log-level: info
+ipv6: false
+
+# 外部控制接口（Web UI 用）
+external-controller: 127.0.0.1:9090
+secret: ""
+
+profile:
+  store-selected: true
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "localhost.ptlogin2.qq.com"
+  nameserver:
+    - https://223.5.5.5/dns-query
+    - https://doh.pub/dns-query
+  fallback:
+    - https://1.1.1.1/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+
+# ============ 订阅（只需改这一处）============
+proxy-providers:
+  airport:
+    type: http
+    url: "把这里换成你的订阅地址"      # ← 只改这一行
+    interval: 3600                     # 每小时自动更新节点
+    path: ./providers/airport.yaml
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+
+proxy-groups:
+  # 自动选延迟最低的节点
+  - name: PROXY
+    type: url-test
+    use: [airport]
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+  # 手动指定（UI 里可以自己选）
+  - name: MANUAL
+    type: select
+    use: [airport]
+
+rules:
+  # ---- 只有这些走代理 ----
+  - DOMAIN,api.m-team.cc,PROXY
+
+  # ---- PT 站一律直连（含 tracker / announce / 页面下载）----
+  - DOMAIN-SUFFIX,m-team.cc,DIRECT
+  - DOMAIN-SUFFIX,pttime.org,DIRECT
+  - DOMAIN-SUFFIX,carpt.net,DIRECT
+
+  # ---- 国内直连，其余走代理 ----
+  - GEOIP,CN,DIRECT,no-resolve
+  - MATCH,PROXY
