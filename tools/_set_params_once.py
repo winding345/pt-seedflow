@@ -5,7 +5,7 @@ import urllib.request
 
 BASE = "http://127.0.0.1:8600"
 SERVICE = "auto-mteam-1"
-CHANGES = {"disk_gb": 200.0, "delete_threshold_mb": 128.0}
+CHANGES = {"disk_gb": 200.0, "delete_threshold_mb": 2048.0}
 
 
 def req(path, method="GET", body=None):
