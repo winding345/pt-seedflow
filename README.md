@@ -124,6 +124,22 @@ mysql -h <nas-ip> -P 3366 -u ptsf -p ptsf \
 
 同样的改动也能在网页上做：服务卡片 →「编辑配置」→ 直接改 JSON → 保存。
 
+### 站点走代理
+
+大陆网络访问 m-team 常被 DNS 投毒（解析到劫持 IP，证书 CN 是 `redirect-cnzz`）。
+给站点单独配代理即可，不需要改全局路由：
+
+```yaml
+sites:
+  mteam:
+    base_url: https://api.m-team.cc
+    api_key_file: ~/.rss/m-team.api-key
+    proxy: http://127.0.0.1:7890     # 你的代理监听地址
+```
+
+原理：经 HTTP(S) 代理时，域名由**代理端解析**，本地被投毒的 DNS 结果就不再生效。
+哪些站点需要代理就配哪个，互不影响；代理关掉时该站点报错，其它站点照常。
+
 ### 连接数据库
 
 | 项目 | 值 |

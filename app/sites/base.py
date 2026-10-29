@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 from ..scoring import Candidate
 
@@ -43,9 +43,17 @@ class HTTPClient:
     只依赖标准库，避免为每个站点引入额外依赖。
     """
 
-    def __init__(self, base_url: str, timeout: int = 25):
+    def __init__(self, base_url: str, timeout: int = 25, proxy: str = ""):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.proxy = proxy
+
+    def _open(self, request: Request):
+        """有代理就带代理请求（DNS 由代理解析，可绕开本地投毒）。"""
+        if self.proxy:
+            opener = build_opener(ProxyHandler({"http": self.proxy, "https": self.proxy}))
+            return opener.open(request, timeout=self.timeout)
+        return urlopen(request, timeout=self.timeout)
 
     def request(self, path: str, method: str = "POST",
                 headers: Optional[Dict[str, str]] = None,
@@ -62,7 +70,7 @@ class HTTPClient:
 
         request = Request(url, data=payload, headers=headers or {}, method=method)
         try:
-            with urlopen(request, timeout=self.timeout) as resp:
+            with self._open(request) as resp:
                 raw = resp.read()
         except HTTPError as exc:
             raise SiteError("%s 返回 HTTP %s" % (path, exc.code))

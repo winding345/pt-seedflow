@@ -57,6 +57,8 @@ sites:
 
   mteam:
     base_url: https://api.m-team.cc
+    # 站点走代理（可选）。NAS 上 DNS 被投毒时，让请求经代理发出即可绕开
+    # proxy: http://127.0.0.1:7890
     user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
     # 推荐指向宿主机上的密钥文件；也支持直接写 api_key
     api_key_file: ~/.rss/m-team.api-key

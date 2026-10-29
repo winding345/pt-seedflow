@@ -13,7 +13,7 @@ import re
 from typing import Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 from lxml import etree
 from cssselect import SelectorError
@@ -256,7 +256,13 @@ class NexusPHPHtmlSite(SiteAdapter):
             raise SiteError("站点 %s 未配置 cookie，请在面板「编辑配置 → 站点配置」里填写" % self.cfg.name)
         request = Request(url, headers=headers)
         try:
-            with urlopen(request, timeout=self.cfg.timeout) as resp:
+            if self.cfg.proxy:
+                opener = build_opener(ProxyHandler(
+                    {"http": self.cfg.proxy, "https": self.cfg.proxy}))
+                resp = opener.open(request, timeout=self.cfg.timeout)
+            else:
+                resp = urlopen(request, timeout=self.cfg.timeout)
+            with resp:
                 raw = resp.read()
         except HTTPError as exc:
             raise SiteError("列表页返回 HTTP %s（cookie 可能失效）" % exc.code)

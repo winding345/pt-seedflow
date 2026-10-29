@@ -90,6 +90,8 @@ class SiteConfig:
     cookie: str = ""
     # 下载链接需要的 passkey（部分站点下载链接只带 session，qB 用不了）
     passkey: str = ""
+    # 该站点走代理：http://127.0.0.1:7890 之类；留空则直连
+    proxy: str = ""
     list_url: str = ""
     selectors: Dict[str, Any] = field(default_factory=dict)
 
@@ -98,7 +100,8 @@ class SiteConfig:
                 "user_agent": self.user_agent, "api_key_file": self.api_key_file,
                 "timeout": self.timeout, "type": self.type,
                 "rss_url": self.rss_url, "discount_tags": dict(self.discount_tags),
-                "cookie": self.cookie, "passkey": self.passkey, "list_url": self.list_url,
+                "cookie": self.cookie, "passkey": self.passkey,
+                "proxy": self.proxy, "list_url": self.list_url,
                 "selectors": dict(self.selectors)}
 
     @classmethod
@@ -116,6 +119,7 @@ class SiteConfig:
             discount_tags={str(k): str(v) for k, v in (data.get("discount_tags") or {}).items()},
             cookie=str(data.get("cookie") or ""),
             passkey=str(data.get("passkey") or ""),
+            proxy=str(data.get("proxy") or ""),
             list_url=str(data.get("list_url") or ""),
             selectors=dict(data.get("selectors") or {}),
         )
@@ -383,6 +387,7 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
                            for k, v in (cfg.get("discount_tags") or {}).items()},
             cookie=str(cfg.get("cookie") or ""),
             passkey=str(cfg.get("passkey") or ""),
+            proxy=str(cfg.get("proxy") or ""),
             list_url=str(cfg.get("list_url") or ""),
             selectors=dict(cfg.get("selectors") or {}),
         )

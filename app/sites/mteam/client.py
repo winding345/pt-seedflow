@@ -18,7 +18,7 @@ from .parser import parse_candidates
 
 class MTeamClient(HTTPClient):
     def __init__(self, cfg: SiteConfig):
-        super().__init__(cfg.base_url, cfg.timeout)
+        super().__init__(cfg.base_url, cfg.timeout, proxy=cfg.proxy)
         self.cfg = cfg
         self._key = cfg.resolve_key()
 
