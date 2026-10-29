@@ -8,7 +8,7 @@ import time
 
 import uvicorn
 
-from . import bootstrap
+from . import bootstrap, net
 from .config import ConfigError, load_config, load_seed
 from .confrepo import ConfigRepo
 from .db import Database, MySQLStore
@@ -50,6 +50,8 @@ def build_runners(config, store) -> list:
 
 
 def main(argv=None) -> int:
+    # 先装 IPv4 优先：部分 NAS 环境 IPv6 不通，会把请求打到错误路径
+    net.install_ipv4_preference()
     args = parse_args(argv)
     bootstrap.prepare()
     file_config = load_config()

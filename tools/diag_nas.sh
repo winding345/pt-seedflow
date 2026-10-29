@@ -15,11 +15,13 @@ echo "-- 容器环境代理 --"
 docker exec pt-seedflow env 2>/dev/null | grep -i proxy || echo "(无 proxy 变量)"
 echo "-- 容器时间 --"
 docker exec pt-seedflow date 2>/dev/null
-echo "-- 宿主机解析 --"
-getent hosts api.m-team.cc | head -3
+echo "-- 宿主机解析(v4) --"
+getent ahostsv4 api.m-team.cc | head -2
+echo "-- 宿主机解析(v6) --"
+getent ahostsv6 api.m-team.cc | head -2
 echo "-- 宿主机证书签发者 --"
-openssl s_client -connect api.m-team.cc:443 -servername api.m-team.cc </dev/null 2>/dev/null \
-  | openssl x509 -noout -issuer -subject -dates 2>/dev/null || echo "(openssl 不可用)"
+timeout 8 openssl s_client -connect api.m-team.cc:443 -servername api.m-team.cc </dev/null 2>/dev/null \
+  | openssl x509 -noout -issuer -subject 2>/dev/null || echo "(openssl 超时或不可用)"
 echo "-- 容器内 Python 直连 --"
 docker exec pt-seedflow python -c "
 import urllib.request, ssl
