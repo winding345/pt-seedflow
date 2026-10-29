@@ -197,7 +197,7 @@ def _make_search_runner(page_map, added=(), removed=(), **cfg_kw):
     runner.cfg = ServiceConfig(name="demo", site="mteam", **cfg_kw)
     runner.store = _StubStore(added=added, removed=removed)
     runner.site = _PagedSite({
-        page: [Candidate(tid=t, name="t%s" % t, size=6 * 1024 ** 3) for t in tids]
+        page: [Candidate(tid=t, name="t%s" % t, size=6 * 1024 ** 3, discount="FREE") for t in tids]
         for page, tids in page_map.items()
     })
     runner.ticks_since_search = 5
@@ -238,3 +238,19 @@ def test_search_quota_cancels():
     runner.store.quota["search"] = 1000
     assert runner._step_search(force=True) is False
     assert runner.site.pages_requested == []
+
+
+def test_search_pages_while_usable_below_min_pool():
+    """第 1 页原始条数很多、但可用为 0 时必须继续翻页。"""
+    from app.scoring import Candidate
+
+    runner = _make_search_runner({1: [], 2: []}, search_min_pool=1, search_max_pages=3)
+    runner.cfg.size_mb = (1.0, 1000000.0)            # 体积全放
+    runner.cfg.discounts = ["FREE"]
+    runner.site.page_map = {
+        1: [Candidate(tid="a%d" % i, name="n", size=6 * 1024 ** 3, discount="_4K_FREE") for i in range(50)],
+        2: [Candidate(tid="b1", name="n", size=6 * 1024 ** 3, discount="FREE")],
+    }
+    runner._step_search(force=True)
+    assert runner.site.pages_requested == [1, 2]     # 必须翻到第 2 页
+    assert len(runner.candidates) == 51              # 两页都收进池子
