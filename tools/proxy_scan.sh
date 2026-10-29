@@ -39,6 +39,23 @@ for port in 7890 7891 1080 10809 20171; do
 done
 
 echo
+echo "=== 6.5 DoH 解析对比（加密 DNS，不受投毒影响）==="
+for resolver in "https://223.5.5.5/resolve?name=api.m-team.cc&type=A" \
+                "https://1.1.1.1/dns-query?name=api.m-team.cc&type=A"; do
+  echo "-- $resolver --"
+  timeout 10 curl -sS -H 'accept: application/dns-json' "$resolver" 2>/dev/null \
+    | tr ',' '\n' | grep -E '"data"' | head -3 || echo "(失败)"
+done
+
+echo
+echo "=== 6.6 拿到干净 IP 后直连测试 ==="
+for ip in 104.26.10.251 172.67.68.150; do
+  code=$(timeout 8 curl -sS -o /dev/null -m 8 --resolve "api.m-team.cc:443:$ip" \
+         -w '%{http_code}' https://api.m-team.cc/ 2>/dev/null || echo fail)
+  echo "$ip -> $code"
+done
+
+echo
 echo "=== 7. 订阅/配置目录线索 ==="
 for d in /etc/v2raya /etc/clash /etc/mihomo /etc/sing-box "$HOME/.config/clash" "$HOME/.config/mihomo"; do
   [ -d "$d" ] && echo "存在: $d" && ls "$d" 2>/dev/null | head -5
