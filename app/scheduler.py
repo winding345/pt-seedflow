@@ -487,6 +487,7 @@ class ServiceRunner:
         else:
             self._pool_exhausted = False
 
+        added_hashes: List[str] = []
         for pick in plan.picks:
             if pick.candidate.name in current_names:
                 continue
@@ -517,6 +518,7 @@ class ServiceRunner:
                 new_hash = self._reconcile_new_hash(known_hashes)
                 if new_hash:
                     known_hashes.add(new_hash)
+                    added_hashes.append(new_hash)
                     self.store.set_meta(
                         self.cfg.name, new_hash, pick.candidate.tid,
                         pick.candidate.discount, pick.candidate.discount_end,
@@ -527,6 +529,14 @@ class ServiceRunner:
                           "%.2fGB %s" % (pick.candidate.size / 1024 ** 3, pick.candidate.discount))
             else:
                 self._log("error", pick.candidate.name, "qB 拒绝添加")
+
+        # 新加的种子统一设为「强制继续」，避免卡在暂停/排队状态
+        if added_hashes and not self.cfg.dry_run:
+            try:
+                if not self.qb.set_force_start(added_hashes):
+                    self._log("error", "-", "%d 个新种设置强制继续失败" % len(added_hashes))
+            except QBError as exc:
+                self._log("error", "-", "设置强制继续失败: %s" % exc)
 
         # 加种后以 qB 为准对账：qB 会按 infohash 去重，站点标题与 qB 名称也可能不同
         try:
