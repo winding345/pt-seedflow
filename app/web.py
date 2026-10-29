@@ -15,14 +15,49 @@ from .scheduler import ServiceRunner
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
-def build_status(runners: List[ServiceRunner], started_at: float) -> dict:
+def _empty_stats() -> dict:
+    return {
+        "used_gb": 0.0, "torrents": 0, "candidates": 0,
+        "current_downloaded": 0, "current_uploaded": 0,
+        "since_launch_downloaded": 0, "since_launch_uploaded": 0,
+        "added_total": 0, "removed_total": 0,
+        "search_used": 0, "search_cap": 0, "dl_used": 0, "dl_cap": 0,
+        "next_search_seconds": 0, "quota_exhausted": False,
+    }
+
+
+def _failure_snapshot(info: dict) -> dict:
+    """初始化失败的服务：在面板上显示成一张带错误的卡片。"""
+    return {
+        "name": info.get("name", "?"),
+        "site": info.get("site", ""),
+        "last_error": "服务初始化失败：%s" % info.get("error", "未知原因"),
+        "broken": True,
+        "config": info.get("config") or {},
+        "stats": _empty_stats(),
+        "actions": [{
+            "time": time.strftime("%H:%M:%S"),
+            "kind": "error",
+            "name": "初始化失败",
+            "detail": str(info.get("error", ""))[:200],
+        }],
+    }
+
+
+def build_status(runners: List[ServiceRunner], started_at: float,
+                 failures: dict | None = None) -> dict:
     uptime = int(time.time() - started_at)
     hours, rest = divmod(uptime, 3600)
     minutes, seconds = divmod(rest, 60)
+    services = [r.snapshot() for r in runners]
+    if failures:
+        alive = {r.cfg.name for r in runners}
+        services.extend(_failure_snapshot(info) for name, info in failures.items()
+                        if name not in alive)
     return {
         "uptime_seconds": uptime,
         "uptime_human": "%d 小时 %d 分" % (hours, minutes) if hours else "%d 分 %d 秒" % (minutes, seconds),
-        "services": [r.snapshot() for r in runners],
+        "services": services,
     }
 
 
@@ -34,13 +69,14 @@ def _asset_version() -> int:
         return 0
 
 
-def create_app(runners: List[ServiceRunner], started_at: float, repo=None) -> FastAPI:
+def create_app(runners: List[ServiceRunner], started_at: float, repo=None,
+               failures: dict | None = None) -> FastAPI:
     app = FastAPI(title="pt-seedflow", docs_url=None, redoc_url=None)
 
     # ---------- API ----------
     @app.get("/api/status")
     def status() -> JSONResponse:
-        return JSONResponse(build_status(runners, started_at))
+        return JSONResponse(build_status(runners, started_at, failures))
 
     @app.post("/api/trigger")
     def trigger(payload: dict = Body(...)) -> JSONResponse:

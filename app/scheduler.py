@@ -670,7 +670,8 @@ class Scheduler(threading.Thread):
     """后台调度线程：固定 tick，逻辑顺序由各自 runner 保证。"""
 
     def __init__(self, runners: List[ServiceRunner], tick_seconds: int,
-                 repo=None, reload_seconds: int = 300):
+                 repo=None, reload_seconds: int = 300, failures: Optional[dict] = None,
+                 store=None, downloader=None):
         super().__init__(daemon=True, name="pt-seedflow-scheduler")
         self.runners = runners
         self.tick_seconds = max(10, tick_seconds)
@@ -679,6 +680,11 @@ class Scheduler(threading.Thread):
         self._last_reload = 0.0
         self._last_tick = 0.0
         self._stop_event = threading.Event()
+        # 初始化失败的服务（面板会显示），配置重载时自动重试
+        self.failures = failures if failures is not None else {}
+        self.store = store
+        self.downloader = downloader
+        self._qb = None
 
     def _reload_configs(self) -> None:
         """从数据库重读配置并热更新，改了 MySQL 五分钟内生效。"""
@@ -712,10 +718,54 @@ class Scheduler(threading.Thread):
             try:
                 runner.site = create_site(site_cfg)
                 runner._site_signature = signature
+                self.failures.pop(runner.cfg.name, None)
                 if old is not None:
                     runner._log("config", "站点配置已更新", site_cfg.name)
             except Exception as exc:  # noqa: BLE001
+                self.failures[runner.cfg.name] = {
+                    "name": runner.cfg.name, "site": runner.cfg.site,
+                    "error": str(exc), "config": runner.cfg.to_dict(),
+                }
                 runner._log("error", "站点配置更新失败", str(exc))
+
+        self._revive_failed(configs, sites)
+
+    def _revive_failed(self, configs: dict, sites: dict) -> None:
+        """把启动时失败/后来新增的服务补进来，成功后从 failures 移除。"""
+        if not configs or self.store is None:
+            return
+        alive = {r.cfg.name for r in self.runners}
+        for name, service in configs.items():
+            if not service.enabled or name in alive:
+                continue
+            site_cfg = sites.get(service.site)
+            if site_cfg is None:
+                self.failures[name] = {
+                    "name": name, "site": service.site,
+                    "error": "站点 %s 未配置" % service.site,
+                    "config": service.to_dict(),
+                }
+                continue
+            try:
+                from .sites import create_site
+                site = create_site(site_cfg)
+            except Exception as exc:  # noqa: BLE001
+                self.failures[name] = {
+                    "name": name, "site": service.site,
+                    "error": str(exc), "config": service.to_dict(),
+                }
+                continue
+            if self._qb is None:
+                from .qb import QBittorrent
+                self._qb = QBittorrent(self.downloader)
+            runner = ServiceRunner(
+                cfg=service, site=site, qb=self._qb, store=self.store,
+                tick_seconds=self.tick_seconds,
+                refresh_every_ticks=getattr(self, "refresh_every_ticks", 1),
+            )
+            self.runners.append(runner)
+            self.failures.pop(name, None)
+            runner._log("config", "服务已恢复", service.site)
 
     def run(self) -> None:
         # 配置重载与业务 tick 各自独立计时：
