@@ -117,7 +117,12 @@ class QBittorrent:
 
     def add_url(self, url: str, category: str = "", save_path: str = "",
                 paused: bool = False, auto_tmm: bool = False) -> bool:
-        fields = {"urls": url, "paused": "true" if paused else "false"}
+        fields = {
+            "urls": url,
+            "paused": "true" if paused else "false",
+            # qB 4.6+ 用 stopped，两个都传以兼容不同版本
+            "stopped": "true" if paused else "false",
+        }
         if category:
             fields["category"] = category
         if save_path:
@@ -126,6 +131,16 @@ class QBittorrent:
             fields["autoTMM"] = "true" if auto_tmm else "false"
         text = self._post_multipart("/api/v2/torrents/add", fields).strip()
         return text.startswith("Ok")
+
+    def set_force_start(self, hashes: List[str], value: bool = True) -> bool:
+        """设为「强制继续」，绕过 qB 的排队与暂停状态。"""
+        if not hashes:
+            return True
+        text = self._post_form("/api/v2/torrents/setForceStart", {
+            "hashes": "|".join(hashes),
+            "value": "true" if value else "false",
+        })
+        return "Fails" not in text
 
     def delete(self, hashes: List[str], delete_files: bool = True) -> bool:
         if not hashes:
