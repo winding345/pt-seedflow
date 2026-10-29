@@ -95,7 +95,7 @@ services:
     # search 强制最小间隔（秒），默认 1 小时
     search_interval_seconds: 3600
     # 搜索最多翻几页（只抓第 1 页会被"7 天内已加过"的候选吃光）
-    search_max_pages: 3
+    search_max_pages: 5
     # 过滤掉已加过之后，池子至少要有这么多条才停止翻页
     search_min_pool: 30
     # 候选池被吃空时是否提前补一轮（pttime 一次只给 30 多条，建议开）

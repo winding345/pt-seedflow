@@ -10,7 +10,14 @@ from dataclasses import dataclass, field
 from typing import Deque, Dict, List, Optional
 
 from .config import AppConfig, ServiceConfig
-from .lifecycle import AddPlan, Pick, decide_delete, plan_adds, verify_deletable
+from .lifecycle import (
+    AddPlan,
+    Pick,
+    decide_delete,
+    filter_candidates,
+    plan_adds,
+    verify_deletable,
+)
 from .qb import QBError, QBittorrent
 from .scoring import SEARCH_PAGE_SIZE, Candidate
 from .store import Store
@@ -407,8 +414,10 @@ class ServiceRunner:
                     skipped_excluded += 1
                     continue
                 collected.append(candidate)
-                usable += 1
 
+            # 只有"促销/体积/分类都合格"的才算可用，否则会翻页过早停止
+            eligible, _ = filter_candidates(collected, self.cfg, time.time(), exclude)
+            usable = len(eligible)
             if usable >= self.cfg.search_min_pool:
                 break
 
