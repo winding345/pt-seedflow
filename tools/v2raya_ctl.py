@@ -69,6 +69,33 @@ def probe() -> None:
         print("%-18s %s" % (path, brief[:220]))
 
 
+def endpoints() -> None:
+    """从前端 JS 里提取真实 API 路径。"""
+    import re
+    html = ""
+    try:
+        with urllib.request.urlopen(BASE + "/", timeout=10) as resp:
+            html = resp.read().decode("utf-8", "replace")
+    except Exception as exc:  # noqa: BLE001
+        print("取首页失败:", exc)
+        return
+    assets = re.findall(r'(?:src|href)="([^"]+\.js)"', html) or re.findall(r'"(/assets/[^"]+\.js)"', html)
+    print("JS 资源:", assets[:5])
+    found = set()
+    for asset in assets[:5]:
+        url = asset if asset.startswith("http") else BASE + asset
+        try:
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                js = resp.read().decode("utf-8", "replace")
+        except Exception as exc:  # noqa: BLE001
+            print("取 %s 失败: %s" % (asset, exc))
+            continue
+        for m in re.findall(r'["\'](/api/[a-zA-Z0-9_\-/{}.]+)["\']', js):
+            found.add(m)
+    for path in sorted(found):
+        print(path)
+
+
 def status() -> None:
     for path in ("/api/setting", "/api/touch", "/api/v2ray", "/api/server"):
         res = call(path)
@@ -110,6 +137,10 @@ def check() -> None:
 
 def main(argv: list[str]) -> int:
     action = argv[0] if argv else "status"
+    if action == "endpoints":
+        endpoints()
+        return 0
+
     if action == "probe":
         # probe 也尝试登录，失败不阻塞
         login()
