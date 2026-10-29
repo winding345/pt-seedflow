@@ -142,3 +142,99 @@ def test_no_refill_when_pool_not_empty():
     runner._pool_exhausted = False
     runner.last_search_at = time.time() - 700
     assert runner._need_refresh() is False
+
+
+class _StubStore:
+    """_step_search 需要的最小存储接口。"""
+
+    def __init__(self, added=(), removed=()):
+        self.added = list(added)
+        self.removed = list(removed)
+        self.saved = []
+        self.kv = {}
+        self.quota = {}
+
+    def added_tids_since(self, service, since):
+        return self.added
+
+    def removed_tids_since(self, service, since):
+        return self.removed
+
+    def quota_used(self, service, kind, day):
+        return self.quota.get(kind, 0)
+
+    def quota_add(self, service, kind, day, amount=1):
+        self.quota[kind] = self.quota.get(kind, 0) + amount
+        return self.quota[kind]
+
+    def kv_set(self, service, key, value):
+        self.kv[key] = value
+
+    def kv_get(self, service, key, default=0):
+        return int(self.kv.get(key, default))
+
+    def save_candidates(self, service, payload, saved_at=None):
+        self.saved.append(payload)
+
+
+class _PagedSite:
+    """每页返回固定候选，用于验证翻页与去重。"""
+
+    def __init__(self, page_map):
+        self.page_map = page_map
+        self.pages_requested = []
+
+    def search(self, page=1, page_size=100):
+        self.pages_requested.append(page)
+        return self.page_map.get(page, [])
+
+
+def _make_search_runner(page_map, added=(), removed=(), **cfg_kw):
+    from app.config import ServiceConfig
+    from app.scoring import Candidate
+
+    runner = object.__new__(ServiceRunner)
+    runner.cfg = ServiceConfig(name="demo", site="mteam", **cfg_kw)
+    runner.store = _StubStore(added=added, removed=removed)
+    runner.site = _PagedSite({
+        page: [Candidate(tid=t, name="t%s" % t, size=6 * 1024 ** 3) for t in tids]
+        for page, tids in page_map.items()
+    })
+    runner.ticks_since_search = 5
+    runner.last_search_at = 0.0
+    runner.last_error = ""
+    runner._pool_exhausted = False
+    runner._log = lambda *a, **k: None
+    return runner
+
+
+def test_search_paginates_when_first_page_all_excluded():
+    # 第 1 页 3 条都加过 → 必须翻第 2 页
+    runner = _make_search_runner({1: ["1", "2", "3"], 2: ["4", "5", "6"]},
+                                 added=["1", "2", "3"], search_min_pool=2)
+    assert runner._step_search(force=True) is True
+    assert runner.site.pages_requested == [1, 2]
+    assert [c.tid for c in runner.candidates] == ["4", "5", "6"]
+    assert runner.last_search_at > 0            # 状态必须更新
+    assert runner.ticks_since_search == 0
+    assert runner.store.kv.get("last_search_ts")
+
+
+def test_search_stops_when_pool_big_enough():
+    runner = _make_search_runner({1: ["1", "2", "3", "4"], 2: ["5"]},
+                                 search_min_pool=3)
+    runner._step_search(force=True)
+    assert runner.site.pages_requested == [1]     # 已达目标，不翻页
+
+
+def test_search_respects_max_pages():
+    runner = _make_search_runner({1: [], 2: [], 3: []}, added=[], search_max_pages=2)
+    runner._step_search(force=True)
+    assert runner.site.pages_requested == [1]     # 第 1 页空 → 直接停
+
+
+def test_search_quota_cancels():
+    runner = _make_search_runner({1: ["1"]})
+    runner.store.quota["search"] = 1000
+    assert runner._step_search(force=True) is False
+    assert runner.site.pages_requested == []

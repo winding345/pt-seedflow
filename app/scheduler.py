@@ -360,38 +360,83 @@ class ServiceRunner:
             self._log("quota", "search", "每日额度已用尽 %d/%d" % (used, cap))
             return False
 
-        candidates = None
-        for attempt in range(3):
-            try:
-                candidates = self.site.search(page=1, page_size=SEARCH_PAGE_SIZE)
+        # 搜索阶段就把"已加过 / 刚删过"的候选剔掉，并分页补足池子
+        now_ts = int(time.time())
+        exclude = set(self.store.added_tids_since(self.cfg.name, now_ts - 7 * 86400))
+        exclude |= set(self.store.removed_tids_since(self.cfg.name, now_ts - 86400))
+
+        collected = []
+        seen = set()
+        usable = 0
+        skipped_excluded = 0
+        pages_used = 0
+        failed_pages = 0
+
+        for page in range(1, max(1, self.cfg.search_max_pages) + 1):
+            part = None
+            for attempt in range(3):
+                try:
+                    part = self.site.search(page=page, page_size=SEARCH_PAGE_SIZE)
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    text = str(exc)
+                    transient = any(k in text for k in (
+                        "连接失败", "Connection reset", "timed out", "超时", "Errno 104"))
+                    if not transient or attempt >= 2:
+                        self._log("error", "search", text)
+                        self.last_error = text
+                        part = None
+                        break
+                    time.sleep(2.0 * (attempt + 1))
+
+            if part is None:
+                failed_pages += 1
                 break
-            except Exception as exc:  # noqa: BLE001
-                text = str(exc)
-                transient = any(k in text for k in (
-                    "连接失败", "Connection reset", "timed out", "超时", "Errno 104"))
-                if not transient or attempt >= 2:
-                    self._log("error", "search", text)
-                    self.last_error = text
-                    return False
-                time.sleep(2.0 * (attempt + 1))
-        if candidates is None:
+            if not part:
+                break
+
+            pages_used += 1
+            self.store.quota_add(self.cfg.name, "search", today())
+
+            for candidate in part:
+                tid = str(candidate.tid)
+                if tid in seen:
+                    continue
+                seen.add(tid)
+                if tid in exclude:
+                    skipped_excluded += 1
+                    continue
+                collected.append(candidate)
+                usable += 1
+
+            if usable >= self.cfg.search_min_pool:
+                break
+
+        if pages_used == 0:
+            if failed_pages:
+                return False
+            self.last_error = "搜索无结果"
+            self._log("error", "search", "站点没有返回任何候选")
             return False
 
-        self.store.quota_add(self.cfg.name, "search", today())
-        self.store.kv_set(self.cfg.name, "last_search_ts", int(time.time()))
+        candidates = collected
         self.candidates = candidates
         self.last_search_at = time.time()
         self.ticks_since_search = 0
+        # 持久化上次搜索时间：重启后仍能守住最小间隔
+        self.store.kv_set(self.cfg.name, "last_search_ts", int(self.last_search_at))
         self.store.save_candidates(
             self.cfg.name,
             json.dumps([c.as_dict() for c in candidates], ensure_ascii=False),
             int(self.last_search_at),
         )
-        detail = "%d 个候选" % len(candidates)
+        detail = "%d 个可用候选" % len(candidates)
+        if pages_used > 1 or skipped_excluded:
+            detail += "（翻 %d 页，剔除已加过 %d 条）" % (pages_used, skipped_excluded)
         if force and self._pool_exhausted:
-            detail += "（池子空了，提前补）"
+            detail += " · 池子空了提前补"
         elif force:
-            detail += "（手动）"
+            detail += " · 手动"
         self._log("search", "候选池", detail)
         return True
 

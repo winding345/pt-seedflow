@@ -187,6 +187,10 @@ class ServiceConfig:
     delete_unfinished_after_discount: bool = True
     # search 强制最小间隔（秒）
     search_interval_seconds: int = 3600
+    # 搜索最多翻几页；只抓第 1 页时会被"已加过"的候选吃光
+    search_max_pages: int = 3
+    # 过滤掉已加过之后，池子至少要有这么多条才停止翻页
+    search_min_pool: int = 30
     # 候选池被吃光时是否提前补一轮
     refill_when_empty: bool = True
     # 提前补池的最小间隔（秒），避免对站点太频繁
@@ -231,6 +235,8 @@ class ServiceConfig:
             "add_per_tick": self.add_per_tick,
             "delete_unfinished_after_discount": self.delete_unfinished_after_discount,
             "search_interval_seconds": self.search_interval_seconds,
+            "search_max_pages": self.search_max_pages,
+            "search_min_pool": self.search_min_pool,
             "refill_when_empty": self.refill_when_empty,
             "refill_min_seconds": self.refill_min_seconds,
             "limits": self.limits.to_dict(),
@@ -264,6 +270,8 @@ class ServiceConfig:
             delete_unfinished_after_discount=bool(
                 data.get("delete_unfinished_after_discount", True)),
             search_interval_seconds=int(data.get("search_interval_seconds", 3600)),
+            search_max_pages=int(data.get("search_max_pages", 3)),
+            search_min_pool=int(data.get("search_min_pool", 30)),
             refill_when_empty=bool(data.get("refill_when_empty", True)),
             refill_min_seconds=int(data.get("refill_min_seconds", 600)),
             limits=Limits.from_dict(data.get("limits") or {}),
