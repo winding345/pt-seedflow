@@ -27,3 +27,6 @@ venv/
 .uv/
 .env
 mysql-data/
+
+# 临时运维脚本不入库（个人工具请放仓库外）
+tools/_*
